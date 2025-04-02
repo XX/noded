@@ -1,7 +1,7 @@
 use eframe::{App, CreationContext};
 use egui::Id;
 use egui_snarl::Snarl;
-use egui_snarl::ui::{NodeLayout, PinPlacement, SnarlStyle, SnarlWidget, get_selected_nodes};
+use egui_snarl::ui::{NodeLayout, PinPlacement, SnarlStyle, SnarlWidget};
 
 use crate::node::Node;
 use crate::node::viewer::NodeViewer;
@@ -87,35 +87,6 @@ impl App for NodedApp {
             egui::ScrollArea::vertical().show(ui, |ui| {
                 egui_probe::Probe::new(&mut self.style).show(ui);
                 egui_probe::Probe::new(&mut self.settings).show(ui);
-            });
-        });
-
-        egui::SidePanel::right("selected-list").show(ctx, |ui| {
-            egui::ScrollArea::vertical().show(ui, |ui| {
-                ui.strong("Selected nodes");
-
-                let selected = get_selected_nodes(Id::new("noded"), ui.ctx());
-
-                let mut selected = selected.into_iter().map(|id| (id, &self.snarl[id])).collect::<Vec<_>>();
-
-                selected.sort_by_key(|(id, _)| *id);
-
-                let mut remove = None;
-
-                for (id, node) in selected {
-                    ui.horizontal(|ui| {
-                        ui.label(format!("{id:?}"));
-                        ui.label(node.name());
-                        ui.add_space(ui.spacing().item_spacing.x);
-                        if ui.button("Remove").clicked() {
-                            remove = Some(id);
-                        }
-                    });
-                }
-
-                if let Some(id) = remove {
-                    self.snarl.remove_node(id);
-                }
             });
         });
 
