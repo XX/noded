@@ -1,3 +1,4 @@
+use eframe::CreationContext;
 use egui::epaint::Hsva;
 use egui::{Color32, Ui};
 use egui_snarl::ui::{AnyPins, PinInfo, SnarlViewer, WireStyle};
@@ -8,6 +9,7 @@ use super::{
     CameraNode, DielectricNode, MaterialNode, MetalNode, Node, OutputNode, PrimitiveNode, RenderNode, SphereNode,
 };
 use crate::node::expression::ExpressionNode;
+use crate::render::Custom3d;
 use crate::types::{Color, NodePin, Vector3};
 use crate::widget::color_picker::{Alpha, color_button, color_edit_button_srgba};
 
@@ -17,7 +19,21 @@ pub const VECTOR_COLOR: Color32 = Color32::from_rgb(0x00, 0x00, 0xb0);
 pub const MATERIAL_COLOR: Color32 = Color32::from_rgb(0xb0, 0x00, 0xb0);
 pub const UNTYPED_COLOR: Color32 = Color32::from_rgb(0xb0, 0xb0, 0xb0);
 
-pub struct NodeViewer;
+pub struct NodeViewer {
+    paint: Custom3d,
+}
+
+impl NodeViewer {
+    pub fn new(cx: &CreationContext) -> Self {
+        Self {
+            paint: Custom3d::new(cx),
+        }
+    }
+
+    pub fn after_show(&mut self, _ui: &mut Ui, response: &egui::Response) {
+        self.paint.recalc_angle(response.drag_delta().x);
+    }
+}
 
 impl SnarlViewer<Node> for NodeViewer {
     #[inline]
@@ -252,6 +268,18 @@ impl SnarlViewer<Node> for NodeViewer {
             Node::Expression(_) => frame.fill(egui::Color32::from_rgb(70, 66, 40)),
             _ => frame.fill(egui::Color32::from_rgb(40, 40, 70)),
         }
+    }
+
+    fn draw_background(
+        &mut self,
+        _background: Option<&egui_snarl::ui::BackgroundPattern>,
+        viewport: &egui::Rect,
+        _snarl_style: &egui_snarl::ui::SnarlStyle,
+        _style: &egui::Style,
+        painter: &egui::Painter,
+        _snarl: &Snarl<Node>,
+    ) {
+        self.paint.draw(*viewport, painter);
     }
 }
 

@@ -5,7 +5,8 @@ edition = "2024"
 
 [dependencies]
 bitflags = "2.9"
-eframe = { version = "0.31", features = ["serde", "persistence"] }
+bytemuck = { version = "1.22", features = ["derive"] }
+eframe = { version = "0.31", features = ["serde", "persistence", "wgpu"] }
 egui = "0.31"
 egui-probe = { version = "0.8.0", features = ["derive"] }
 egui-scale = "0.1"

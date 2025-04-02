@@ -21,6 +21,7 @@ pub struct NodedApp {
     snarl: Snarl<Node>,
     style: SnarlStyle,
     settings: AppSettings,
+    viewer: NodeViewer,
 }
 
 impl NodedApp {
@@ -52,7 +53,12 @@ impl NodedApp {
                 .unwrap_or_default()
         });
 
-        NodedApp { snarl, style, settings }
+        NodedApp {
+            snarl,
+            style,
+            settings,
+            viewer: NodeViewer::new(cx),
+        }
     }
 }
 
@@ -93,10 +99,13 @@ impl App for NodedApp {
         ctx.style_mut(|style| style.animation_time = self.settings.animation_time);
 
         egui::CentralPanel::default().show(ctx, |ui| {
-            SnarlWidget::new()
-                .id(Id::new("noded"))
-                .style(self.style)
-                .show(&mut self.snarl, &mut NodeViewer, ui);
+            let response =
+                SnarlWidget::new()
+                    .id(Id::new("noded"))
+                    .style(self.style)
+                    .show(&mut self.snarl, &mut self.viewer, ui);
+
+            self.viewer.after_show(ui, &response);
         });
     }
 

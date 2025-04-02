@@ -2,6 +2,7 @@ use self::app::NodedApp;
 
 mod app;
 mod node;
+mod render;
 mod types;
 mod widget;
 
