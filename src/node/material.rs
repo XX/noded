@@ -12,12 +12,12 @@ use crate::types::{Color, NodePin};
 pub enum MaterialNode {
     Metal(MetalNode),
     Dielectric(DielectricNode),
-    Lambert(LambertNode),
+    Lambertian(LambertianNode),
 }
 
 impl Default for MaterialNode {
     fn default() -> Self {
-        Self::Lambert(LambertNode::default())
+        Self::Lambertian(LambertianNode::default())
     }
 }
 
@@ -28,7 +28,7 @@ impl MaterialNode {
         match self {
             Self::Metal(_) => MetalNode::NAME,
             Self::Dielectric(_) => DielectricNode::NAME,
-            Self::Lambert(_) => LambertNode::NAME,
+            Self::Lambertian(_) => LambertianNode::NAME,
         }
     }
 
@@ -36,7 +36,7 @@ impl MaterialNode {
         match self {
             Self::Metal(metal) => metal.inputs(),
             Self::Dielectric(dielectric) => dielectric.inputs(),
-            Self::Lambert(lambert) => lambert.inputs(),
+            Self::Lambertian(lambert) => lambert.inputs(),
         }
     }
 
@@ -44,7 +44,15 @@ impl MaterialNode {
         match self {
             Self::Metal(metal) => metal.outputs(),
             Self::Dielectric(dielectric) => dielectric.outputs(),
-            Self::Lambert(lambert) => lambert.outputs(),
+            Self::Lambertian(lambert) => lambert.outputs(),
+        }
+    }
+
+    pub fn disconnect_input(&mut self, input: usize) {
+        match self {
+            Self::Metal(metal) => metal.disconnect_input(input),
+            Self::Dielectric(dielectric) => dielectric.disconnect_input(input),
+            Self::Lambertian(lambert) => lambert.disconnect_input(input),
         }
     }
 
@@ -62,10 +70,10 @@ impl MaterialNode {
         }
     }
 
-    pub fn as_lambert_node(&mut self) -> &mut LambertNode {
+    pub fn as_lambert_node(&mut self) -> &mut LambertianNode {
         match self {
-            Self::Lambert(lambert) => lambert,
-            node => panic!("Node `{}` is not a `{}`", node.name(), LambertNode::NAME),
+            Self::Lambertian(lambert) => lambert,
+            node => panic!("Node `{}` is not a `{}`", node.name(), LambertianNode::NAME),
         }
     }
 }
@@ -79,8 +87,8 @@ pub struct MetalNode {
 impl MetalNode {
     pub const NAME: &str = "Metal Material";
     pub const INPUTS: [u64; 2] = [
-        NodeFlags::COLOR.bits() | NodeFlags::VECTOR.bits() | NodeFlags::NUMBER.bits() | NodeFlags::EXPRESSION.bits(),
-        NodeFlags::NUMBER.bits() | NodeFlags::EXPRESSION.bits(),
+        NodeFlags::TYPICAL_VECTOR_INPUT.bits(),
+        NodeFlags::TYPICAL_NUMBER_INPUT.bits(),
     ];
     pub const OUTPUTS: [u64; 1] = [NodeFlags::MATERIAL_METAL.bits()];
 
@@ -111,6 +119,14 @@ impl MetalNode {
             _ => unreachable!(),
         }
     }
+
+    pub fn disconnect_input(&mut self, input: usize) {
+        match input {
+            0 => self.albedo.reset(),
+            1 => self.roughness.reset(),
+            _ => unreachable!(),
+        }
+    }
 }
 
 #[derive(Clone, Default, Serialize, Deserialize)]
@@ -120,7 +136,7 @@ pub struct DielectricNode {
 
 impl DielectricNode {
     pub const NAME: &str = "Dielectric Material";
-    pub const INPUTS: [u64; 1] = [NodeFlags::NUMBER.bits() | NodeFlags::EXPRESSION.bits()];
+    pub const INPUTS: [u64; 1] = [NodeFlags::TYPICAL_NUMBER_INPUT.bits()];
     pub const OUTPUTS: [u64; 1] = [NodeFlags::MATERIAL_DIELECTRIC.bits()];
 
     pub fn inputs(&self) -> &[u64] {
@@ -143,14 +159,21 @@ impl DielectricNode {
             _ => unreachable!(),
         }
     }
+
+    pub fn disconnect_input(&mut self, input: usize) {
+        match input {
+            0 => self.ior.reset(),
+            _ => unreachable!(),
+        }
+    }
 }
 
 #[derive(Clone, Serialize, Deserialize)]
-pub struct LambertNode {
+pub struct LambertianNode {
     albedo: NodePin<Color>,
 }
 
-impl Default for LambertNode {
+impl Default for LambertianNode {
     fn default() -> Self {
         Self {
             albedo: NodePin::new(Color::LIGHT_GRAY),
@@ -158,12 +181,9 @@ impl Default for LambertNode {
     }
 }
 
-impl LambertNode {
-    pub const NAME: &str = "Lambert Material";
-    pub const INPUTS: [u64; 1] = [NodeFlags::COLOR.bits()
-        | NodeFlags::VECTOR.bits()
-        | NodeFlags::NUMBER.bits()
-        | NodeFlags::EXPRESSION.bits()];
+impl LambertianNode {
+    pub const NAME: &str = "Lambertian Material";
+    pub const INPUTS: [u64; 1] = [NodeFlags::TYPICAL_VECTOR_INPUT.bits()];
     pub const OUTPUTS: [u64; 1] = [NodeFlags::MATERIAL_LAMBERT.bits()];
 
     pub fn inputs(&self) -> &[u64] {
@@ -183,6 +203,13 @@ impl LambertNode {
                 let node = snarl[pin.id.node].as_material_node().as_lambert_node();
                 color_input_view(ui, LABEL, &mut node.albedo, remote_value)
             },
+            _ => unreachable!(),
+        }
+    }
+
+    pub fn disconnect_input(&mut self, input: usize) {
+        match input {
+            0 => self.albedo.reset(),
             _ => unreachable!(),
         }
     }

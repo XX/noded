@@ -4,7 +4,7 @@ use egui::{Color32, Ui};
 use egui_snarl::ui::{AnyPins, PinInfo, SnarlViewer, WireStyle};
 use egui_snarl::{InPin, InPinId, NodeId, OutPin, OutPinId, Snarl};
 
-use super::material::LambertNode;
+use super::material::LambertianNode;
 use super::{
     CameraNode, DielectricNode, MaterialNode, MetalNode, Node, OutputNode, PrimitiveNode, RenderNode, SphereNode,
 };
@@ -53,6 +53,18 @@ impl SnarlViewer<Node> for NodeViewer {
         }
     }
 
+    #[inline]
+    fn disconnect(&mut self, from: &OutPin, to: &InPin, snarl: &mut Snarl<Node>) {
+        snarl[to.id.node].disconnect_input(to.id.input);
+        snarl.disconnect(from.id, to.id);
+    }
+
+    #[inline]
+    fn drop_inputs(&mut self, pin: &InPin, snarl: &mut Snarl<Node>) {
+        snarl[pin.id.node].disconnect_input(pin.id.input);
+        snarl.drop_inputs(pin.id);
+    }
+
     fn title(&mut self, node: &Node) -> String {
         node.name().to_owned()
     }
@@ -70,7 +82,7 @@ impl SnarlViewer<Node> for NodeViewer {
         match &mut snarl[pin.id.node] {
             Node::Material(MaterialNode::Metal(_)) => MetalNode::show_input(pin, ui, snarl),
             Node::Material(MaterialNode::Dielectric(_)) => DielectricNode::show_input(pin, ui, snarl),
-            Node::Material(MaterialNode::Lambert(_)) => LambertNode::show_input(pin, ui, snarl),
+            Node::Material(MaterialNode::Lambertian(_)) => LambertianNode::show_input(pin, ui, snarl),
             Node::Primitive(PrimitiveNode::Sphere(_)) => SphereNode::show_input(pin, ui, snarl),
             Node::Collection(collection) => collection.show_input(pin, ui),
             Node::Camera(_) => CameraNode::show_input(pin, ui, snarl),
@@ -274,18 +286,6 @@ impl SnarlViewer<Node> for NodeViewer {
             _ => frame.fill(egui::Color32::from_rgb(40, 40, 70)),
         }
     }
-
-    // fn draw_background(
-    //     &mut self,
-    //     _background: Option<&egui_snarl::ui::BackgroundPattern>,
-    //     viewport: &egui::Rect,
-    //     _snarl_style: &egui_snarl::ui::SnarlStyle,
-    //     _style: &egui::Style,
-    //     painter: &egui::Painter,
-    //     _snarl: &Snarl<Node>,
-    // ) {
-    //     self.draw(viewport, painter);
-    // }
 }
 
 pub fn format_float(value: f64) -> String {

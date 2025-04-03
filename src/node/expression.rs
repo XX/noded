@@ -161,6 +161,8 @@ impl ExpressionNode {
             },
         }
     }
+
+    pub fn disconnect_input(&mut self, input: usize) {}
 }
 
 #[derive(Clone, Copy, serde::Serialize, serde::Deserialize)]

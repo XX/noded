@@ -32,7 +32,13 @@ impl PrimitiveNode {
         }
     }
 
-    pub fn as_sphere(&self) -> &SphereNode {
+    pub fn disconnect_input(&mut self, input: usize) {
+        match self {
+            Self::Sphere(sphere) => sphere.disconnect_input(input),
+        }
+    }
+
+    pub fn as_sphere_node(&mut self) -> &mut SphereNode {
         match self {
             Self::Sphere(sphere) => sphere,
         }
@@ -59,8 +65,8 @@ impl Default for SphereNode {
 impl SphereNode {
     pub const NAME: &str = "Sphere Primitive";
     pub const INPUTS: [u64; 3] = [
-        NodeFlags::VECTOR.bits() | NodeFlags::COLOR.bits() | NodeFlags::NUMBER.bits() | NodeFlags::EXPRESSION.bits(),
-        NodeFlags::NUMBER.bits() | NodeFlags::EXPRESSION.bits(),
+        NodeFlags::TYPICAL_VECTOR_INPUT.bits(),
+        NodeFlags::TYPICAL_NUMBER_INPUT.bits(),
         NodeFlags::MATERIALS.bits(),
     ];
     pub const OUTPUTS: [u64; 1] = [NodeFlags::PRIMITIVE_SPHERE.bits()];
@@ -79,29 +85,32 @@ impl SphereNode {
                 const LABEL: &str = "Center";
 
                 let remote_value = vector_input_remote_value(pin, snarl, LABEL);
-                let Node::Primitive(PrimitiveNode::Sphere(node)) = &mut snarl[pin.id.node] else {
-                    panic!()
-                };
+                let node = snarl[pin.id.node].as_primitive_node().as_sphere_node();
                 vector_input_view(ui, LABEL, &mut node.center, remote_value)
             },
             1 => {
                 const LABEL: &str = "Radius";
 
                 let remote_value = number_input_remote_value(pin, snarl, LABEL);
-                let Node::Primitive(PrimitiveNode::Sphere(node)) = &mut snarl[pin.id.node] else {
-                    panic!()
-                };
+                let node = snarl[pin.id.node].as_primitive_node().as_sphere_node();
                 number_input_view(ui, LABEL, &mut node.radius, remote_value)
             },
             2 => {
                 const LABEL: &str = "Material";
 
                 let remote_value = material_input_remote_value(pin, snarl, LABEL);
-                let Node::Primitive(PrimitiveNode::Sphere(node)) = &mut snarl[pin.id.node] else {
-                    panic!()
-                };
+                let node = snarl[pin.id.node].as_primitive_node().as_sphere_node();
                 material_input_view(ui, LABEL, &mut node.material, remote_value)
             },
+            _ => unreachable!(),
+        }
+    }
+
+    pub fn disconnect_input(&mut self, input: usize) {
+        match input {
+            0 => self.center.reset(),
+            1 => self.radius.reset(),
+            2 => self.material.reset(),
             _ => unreachable!(),
         }
     }

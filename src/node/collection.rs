@@ -40,4 +40,9 @@ impl CollectionNode {
     pub fn show_input(&self, pin: &InPin, ui: &mut Ui) -> PinInfo {
         empty_input_view(ui, &(pin.id.input + 1).to_string())
     }
+
+    pub fn disconnect_input(&mut self, input: usize) {
+        self.nodes.remove(input);
+        self.inputs.remove(input);
+    }
 }

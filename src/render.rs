@@ -77,9 +77,6 @@ impl Custom3d {
             }],
         });
 
-        // Because the graphics pipeline must have the same lifetime as the egui render pass,
-        // instead of storing the pipeline in our `Custom3D` struct, we insert it into the
-        // `paint_callback_resources` type map, which is stored alongside the render pass.
         render_state
             .renderer
             .write()

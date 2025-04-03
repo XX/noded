@@ -5,12 +5,14 @@ use egui_snarl::{InPin, NodeId, Snarl};
 use serde::{Deserialize, Serialize};
 use viewer::empty_input_view;
 
+use self::camera::CameraNode;
 use self::collection::CollectionNode;
 use self::expression::ExpressionNode;
-use self::material::{DielectricNode, LambertNode, MaterialNode, MetalNode};
+use self::material::{DielectricNode, LambertianNode, MaterialNode, MetalNode};
 use self::primitive::{PrimitiveNode, SphereNode};
 use crate::types::{Color, NodePin, Vector3};
 
+pub mod camera;
 pub mod collection;
 pub mod expression;
 pub mod material;
@@ -41,6 +43,8 @@ bitflags! {
         const EXPRESSION = Self::VECTOR.bits() << 1;
 
         const ALL = u64::MAX;
+        const TYPICAL_VECTOR_INPUT = NodeFlags::VECTOR.bits() | NodeFlags::COLOR.bits() | NodeFlags::NUMBER.bits() | NodeFlags::EXPRESSION.bits();
+        const TYPICAL_NUMBER_INPUT = NodeFlags::NUMBER.bits() | NodeFlags::EXPRESSION.bits();
     }
 }
 
@@ -148,7 +152,7 @@ impl Node {
         match self {
             Self::Material(MaterialNode::Metal(_)) => MetalNode::NAME,
             Self::Material(MaterialNode::Dielectric(_)) => DielectricNode::NAME,
-            Self::Material(MaterialNode::Lambert(_)) => LambertNode::NAME,
+            Self::Material(MaterialNode::Lambertian(_)) => LambertianNode::NAME,
             Self::Primitive(PrimitiveNode::Sphere(_)) => SphereNode::NAME,
             Self::Collection(_) => CollectionNode::NAME,
             Self::Camera(_) => CameraNode::NAME,
@@ -194,6 +198,19 @@ impl Node {
         }
     }
 
+    pub fn disconnect_input(&mut self, input: usize) {
+        match self {
+            Self::Material(material) => material.disconnect_input(input),
+            Self::Primitive(primitive) => primitive.disconnect_input(input),
+            Self::Collection(collection) => collection.disconnect_input(input),
+            Self::Camera(camera) => camera.disconnect_input(input),
+            Self::Render(render) => render.disconnect_input(input),
+            Self::Output(output) => output.disconnect_input(input),
+            Self::Expression(expression) => expression.disconnect_input(input),
+            node => unreachable!("{} node has no inputs", node.name()),
+        }
+    }
+
     fn number_out(&self) -> f64 {
         match self {
             Self::Number(value) => *value,
@@ -230,57 +247,17 @@ impl Node {
         }
     }
 
+    fn as_camera_node(&mut self) -> &mut CameraNode {
+        match self {
+            Self::Camera(camera_node) => camera_node,
+            node => panic!("Node `{}` is not a `{}`", node.name(), CameraNode::NAME),
+        }
+    }
+
     fn as_expression_node(&mut self) -> &mut ExpressionNode {
         match self {
             Self::Expression(expr_node) => expr_node,
             node => panic!("Node `{}` is not an `{}`", node.name(), ExpressionNode::NAME),
-        }
-    }
-}
-
-#[derive(Clone, Default, Serialize, Deserialize)]
-pub struct CameraNode {
-    scene: NodePin<Vec<NodeId>>,
-}
-
-impl CameraNode {
-    pub const NAME: &str = "Camera";
-    pub const INPUTS: [u64; 1] = [NodeFlags::PRIMITIVES.bits() | NodeFlags::COLLECTION.bits()];
-    pub const OUTPUTS: [u64; 1] = [NodeFlags::CAMERA.bits()];
-
-    pub fn inputs(&self) -> &[u64] {
-        &Self::INPUTS
-    }
-
-    pub fn outputs(&self) -> &[u64] {
-        &Self::OUTPUTS
-    }
-
-    pub fn show_input(pin: &InPin, ui: &mut Ui, snarl: &mut Snarl<Node>) -> PinInfo {
-        match pin.id.input {
-            0 => {
-                const LABEL: &str = "Scene";
-
-                let remote_value = match &*pin.remotes {
-                    [] => None,
-                    [remote] => Some(match &snarl[remote.node] {
-                        Node::Primitive(_) => vec![remote.node],
-                        Node::Collection(collection) => collection.cloned_nodes(),
-                        node => unreachable!("{LABEL} input not suppor connection with `{}`", node.name()),
-                    }),
-                    _ => None,
-                };
-
-                if let Some(value) = remote_value {
-                    let Node::Camera(node) = &mut snarl[pin.id.node] else {
-                        panic!()
-                    };
-                    node.scene.set(value);
-                }
-
-                empty_input_view(ui, LABEL)
-            },
-            _ => unreachable!(),
         }
     }
 }
@@ -329,6 +306,13 @@ impl RenderNode {
             _ => unreachable!(),
         }
     }
+
+    pub fn disconnect_input(&mut self, input: usize) {
+        match input {
+            0 => self.camera.reset(),
+            _ => unreachable!(),
+        }
+    }
 }
 
 #[derive(Clone, Default, Serialize, Deserialize)]
@@ -353,4 +337,6 @@ impl OutputNode {
             _ => unreachable!(),
         }
     }
+
+    pub fn disconnect_input(&mut self, _input: usize) {}
 }
