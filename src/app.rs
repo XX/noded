@@ -1,19 +1,43 @@
 use eframe::{App, CreationContext};
-use egui::Id;
+use egui::{Area, Id, Key, Sense};
 use egui_snarl::Snarl;
 use egui_snarl::ui::{NodeLayout, PinPlacement, SnarlStyle, SnarlWidget};
+use serde::{Deserialize, Serialize};
 
 use crate::node::Node;
 use crate::node::viewer::NodeViewer;
+use crate::types::Color;
 
-#[derive(serde::Deserialize, serde::Serialize, egui_probe::EguiProbe)]
+#[derive(Debug, Copy, Clone, Deserialize, Serialize, egui_probe::EguiProbe)]
+pub enum EditMode {
+    Editing,
+    View,
+}
+
+impl EditMode {
+    pub fn switch(&mut self) -> Self {
+        match self {
+            Self::Editing => *self = Self::View,
+            Self::View => *self = Self::Editing,
+        }
+        *self
+    }
+}
+
+#[derive(Debug, Deserialize, Serialize, egui_probe::EguiProbe)]
 pub struct AppSettings {
+    pub edit_mode: EditMode,
+    pub show_nodes: bool,
     pub animation_time: f32,
 }
 
 impl Default for AppSettings {
     fn default() -> Self {
-        Self { animation_time: 10.0 }
+        Self {
+            edit_mode: EditMode::Editing,
+            show_nodes: true,
+            animation_time: 10.0,
+        }
     }
 }
 
@@ -99,13 +123,40 @@ impl App for NodedApp {
         ctx.style_mut(|style| style.animation_time = self.settings.animation_time);
 
         egui::CentralPanel::default().show(ctx, |ui| {
-            let response =
-                SnarlWidget::new()
-                    .id(Id::new("noded"))
-                    .style(self.style)
-                    .show(&mut self.snarl, &mut self.viewer, ui);
+            if ui.input(|i| i.key_pressed(Key::Tab)) {
+                self.settings.edit_mode.switch();
+            }
 
-            self.viewer.after_show(ui, &response);
+            match self.settings.edit_mode {
+                EditMode::Editing => ui.set_opacity(1.0),
+                EditMode::View => ui.set_opacity(0.3),
+            }
+
+            SnarlWidget::new()
+                .id(Id::new("noded"))
+                .style(self.style)
+                .show(&mut self.snarl, &mut self.viewer, ui);
+
+            ui.set_opacity(1.0);
+
+            let last_panel_rect = ui.min_rect();
+
+            if let EditMode::View = self.settings.edit_mode {
+                let overlay_response = Area::new(Id::new("overlay_area"))
+                    .fixed_pos(last_panel_rect.left_top())
+                    .order(egui::Order::Foreground)
+                    .interactable(false)
+                    .show(ui.ctx(), |ui| {
+                        let blocker_response =
+                            ui.interact(last_panel_rect, Id::new("overlay_blocker"), Sense::click_and_drag());
+
+                        ui.painter().rect_filled(last_panel_rect, 0.0, Color::TRANSPARENT);
+                        blocker_response
+                    })
+                    .inner;
+
+                self.viewer.after_show(ui, &overlay_response);
+            }
         });
     }
 
@@ -143,7 +194,7 @@ const fn default_style() -> SnarlStyle {
             inner_margin: egui::Margin::ZERO,
             outer_margin: egui::Margin::same(2),
             corner_radius: egui::CornerRadius::ZERO,
-            fill: egui::Color32::from_gray(40),
+            fill: egui::Color32::TRANSPARENT,
             stroke: egui::Stroke::NONE,
             shadow: egui::Shadow::NONE,
         }),

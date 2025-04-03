@@ -31,7 +31,8 @@ impl NodeViewer {
     }
 
     pub fn after_show(&mut self, _ui: &mut Ui, response: &egui::Response) {
-        self.paint.recalc_angle(response.drag_delta().x);
+        let drag = response.drag_delta().x;
+        self.paint.recalc_angle(drag);
     }
 }
 
