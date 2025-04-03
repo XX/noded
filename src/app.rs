@@ -1,12 +1,11 @@
 use eframe::{App, CreationContext};
-use egui::{Area, Frame, Id, Key, LayerId, Order, Sense, UiBuilder};
+use egui::{Id, Key, LayerId, Order, Sense, UiBuilder};
 use egui_snarl::Snarl;
 use egui_snarl::ui::{NodeLayout, PinPlacement, SnarlStyle, SnarlWidget};
 use serde::{Deserialize, Serialize};
 
+use crate::node::Node;
 use crate::node::viewer::NodeViewer;
-use crate::node::{Node, viewer};
-use crate::types::Color;
 
 #[derive(Debug, Copy, Clone, Deserialize, Serialize, egui_probe::EguiProbe)]
 pub enum EditMode {
@@ -214,7 +213,7 @@ const fn default_style() -> SnarlStyle {
         }),
         bg_frame: Some(egui::Frame {
             inner_margin: egui::Margin::ZERO,
-            outer_margin: egui::Margin::same(2),
+            outer_margin: egui::Margin::ZERO,
             corner_radius: egui::CornerRadius::ZERO,
             fill: egui::Color32::TRANSPARENT,
             stroke: egui::Stroke::NONE,
