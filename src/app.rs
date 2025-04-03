@@ -1,5 +1,5 @@
 use eframe::{App, CreationContext};
-use egui::{Area, Frame, Id, Key, Order, Sense};
+use egui::{Area, Frame, Id, Key, LayerId, Order, Sense, UiBuilder};
 use egui_snarl::Snarl;
 use egui_snarl::ui::{NodeLayout, PinPlacement, SnarlStyle, SnarlWidget};
 use serde::{Deserialize, Serialize};
@@ -132,48 +132,50 @@ impl App for NodedApp {
             }
 
             let last_panel_rect = ui.min_rect();
-            Area::new(Id::new("render_area"))
-                .fixed_pos(last_panel_rect.left_top())
-                .default_size(last_panel_rect.size())
-                .order(Order::Background)
-                .interactable(false)
-                .show(ui.ctx(), |ui| {
-                    self.viewer.draw(&last_panel_rect, ui.painter());
-                });
+
+            // Render area in the background
+            let render_area_ui = ui.new_child(
+                UiBuilder::new()
+                    .layer_id(LayerId::new(Order::Background, Id::new("render_area")))
+                    .max_rect(last_panel_rect)
+                    .sense(Sense::empty()),
+            );
+            self.viewer.draw(&last_panel_rect, render_area_ui.painter());
 
             if self.settings.show_nodes {
-                Area::new(Id::new("editing_area"))
-                    .fixed_pos(last_panel_rect.left_top())
-                    .default_size(last_panel_rect.size())
-                    .order(Order::Middle)
-                    .interactable(true)
-                    .show(ui.ctx(), |ui| {
-                        ui.set_max_size(last_panel_rect.size());
+                // Editing area with nodes in the middle
+                let mut editing_area_ui = ui.new_child(
+                    UiBuilder::new()
+                        .layer_id(LayerId::new(Order::Middle, Id::new("editing_area")))
+                        .max_rect(last_panel_rect)
+                        .sense(Sense::empty()),
+                );
 
-                        let opacity = match self.settings.edit_mode {
-                            EditMode::Editing => self.settings.editing_nodes_opacity,
-                            EditMode::View => self.settings.viewing_nodes_opacity,
-                        };
-                        ui.set_opacity(opacity);
+                editing_area_ui.set_max_size(last_panel_rect.size());
 
-                        SnarlWidget::new().id(Id::new("noded")).style(self.style).show(
-                            &mut self.snarl,
-                            &mut self.viewer,
-                            ui,
-                        );
-                    });
+                let opacity = match self.settings.edit_mode {
+                    EditMode::Editing => self.settings.editing_nodes_opacity,
+                    EditMode::View => self.settings.viewing_nodes_opacity,
+                };
+                editing_area_ui.set_opacity(opacity);
+
+                SnarlWidget::new().id(Id::new("noded")).style(self.style).show(
+                    &mut self.snarl,
+                    &mut self.viewer,
+                    &mut editing_area_ui,
+                );
             }
 
             if let EditMode::View = self.settings.edit_mode {
-                let overlay_response = Area::new(Id::new("overlay_area"))
-                    .fixed_pos(last_panel_rect.left_top())
-                    .default_size(last_panel_rect.size())
-                    .order(Order::Foreground)
-                    .interactable(false)
-                    .show(ui.ctx(), |ui| {
-                        ui.interact(last_panel_rect, Id::new("overlay_blocker"), Sense::click_and_drag())
-                    })
-                    .inner;
+                // Overlay mouse blocker in the foreground
+                let render_area_ui = ui.new_child(
+                    UiBuilder::new()
+                        .layer_id(LayerId::new(Order::Foreground, Id::new("overlay_area")))
+                        .max_rect(last_panel_rect)
+                        .sense(Sense::empty()),
+                );
+                let overlay_response =
+                    render_area_ui.interact(last_panel_rect, Id::new("overlay_blocker"), Sense::click_and_drag());
 
                 self.viewer.after_show(ui, &overlay_response);
             }
