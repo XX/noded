@@ -1,11 +1,11 @@
 use eframe::{App, CreationContext};
-use egui::{Area, Id, Key, Sense};
+use egui::{Area, Frame, Id, Key, Order, Sense};
 use egui_snarl::Snarl;
 use egui_snarl::ui::{NodeLayout, PinPlacement, SnarlStyle, SnarlWidget};
 use serde::{Deserialize, Serialize};
 
-use crate::node::Node;
 use crate::node::viewer::NodeViewer;
+use crate::node::{Node, viewer};
 use crate::types::Color;
 
 #[derive(Debug, Copy, Clone, Deserialize, Serialize, egui_probe::EguiProbe)]
@@ -27,6 +27,8 @@ impl EditMode {
 #[derive(Debug, Deserialize, Serialize, egui_probe::EguiProbe)]
 pub struct AppSettings {
     pub edit_mode: EditMode,
+    pub editing_nodes_opacity: f32,
+    pub viewing_nodes_opacity: f32,
     pub show_nodes: bool,
     pub animation_time: f32,
 }
@@ -35,6 +37,8 @@ impl Default for AppSettings {
     fn default() -> Self {
         Self {
             edit_mode: EditMode::Editing,
+            editing_nodes_opacity: 1.0,
+            viewing_nodes_opacity: 0.5,
             show_nodes: true,
             animation_time: 10.0,
         }
@@ -127,31 +131,47 @@ impl App for NodedApp {
                 self.settings.edit_mode.switch();
             }
 
-            match self.settings.edit_mode {
-                EditMode::Editing => ui.set_opacity(1.0),
-                EditMode::View => ui.set_opacity(0.3),
-            }
-
-            SnarlWidget::new()
-                .id(Id::new("noded"))
-                .style(self.style)
-                .show(&mut self.snarl, &mut self.viewer, ui);
-
-            ui.set_opacity(1.0);
-
             let last_panel_rect = ui.min_rect();
+            Area::new(Id::new("render_area"))
+                .fixed_pos(last_panel_rect.left_top())
+                .default_size(last_panel_rect.size())
+                .order(Order::Background)
+                .interactable(false)
+                .show(ui.ctx(), |ui| {
+                    self.viewer.draw(&last_panel_rect, ui.painter());
+                });
+
+            if self.settings.show_nodes {
+                Area::new(Id::new("editing_area"))
+                    .fixed_pos(last_panel_rect.left_top())
+                    .default_size(last_panel_rect.size())
+                    .order(Order::Middle)
+                    .interactable(true)
+                    .show(ui.ctx(), |ui| {
+                        ui.set_max_size(last_panel_rect.size());
+
+                        let opacity = match self.settings.edit_mode {
+                            EditMode::Editing => self.settings.editing_nodes_opacity,
+                            EditMode::View => self.settings.viewing_nodes_opacity,
+                        };
+                        ui.set_opacity(opacity);
+
+                        SnarlWidget::new().id(Id::new("noded")).style(self.style).show(
+                            &mut self.snarl,
+                            &mut self.viewer,
+                            ui,
+                        );
+                    });
+            }
 
             if let EditMode::View = self.settings.edit_mode {
                 let overlay_response = Area::new(Id::new("overlay_area"))
                     .fixed_pos(last_panel_rect.left_top())
-                    .order(egui::Order::Foreground)
+                    .default_size(last_panel_rect.size())
+                    .order(Order::Foreground)
                     .interactable(false)
                     .show(ui.ctx(), |ui| {
-                        let blocker_response =
-                            ui.interact(last_panel_rect, Id::new("overlay_blocker"), Sense::click_and_drag());
-
-                        ui.painter().rect_filled(last_panel_rect, 0.0, Color::TRANSPARENT);
-                        blocker_response
+                        ui.interact(last_panel_rect, Id::new("overlay_blocker"), Sense::click_and_drag())
                     })
                     .inner;
 

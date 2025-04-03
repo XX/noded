@@ -30,6 +30,10 @@ impl NodeViewer {
         }
     }
 
+    pub fn draw(&mut self, viewport: &egui::Rect, painter: &egui::Painter) {
+        self.paint.draw(*viewport, painter);
+    }
+
     pub fn after_show(&mut self, _ui: &mut Ui, response: &egui::Response) {
         let drag = response.drag_delta().x;
         self.paint.recalc_angle(drag);
@@ -271,17 +275,17 @@ impl SnarlViewer<Node> for NodeViewer {
         }
     }
 
-    fn draw_background(
-        &mut self,
-        _background: Option<&egui_snarl::ui::BackgroundPattern>,
-        viewport: &egui::Rect,
-        _snarl_style: &egui_snarl::ui::SnarlStyle,
-        _style: &egui::Style,
-        painter: &egui::Painter,
-        _snarl: &Snarl<Node>,
-    ) {
-        self.paint.draw(*viewport, painter);
-    }
+    // fn draw_background(
+    //     &mut self,
+    //     _background: Option<&egui_snarl::ui::BackgroundPattern>,
+    //     viewport: &egui::Rect,
+    //     _snarl_style: &egui_snarl::ui::SnarlStyle,
+    //     _style: &egui::Style,
+    //     painter: &egui::Painter,
+    //     _snarl: &Snarl<Node>,
+    // ) {
+    //     self.draw(viewport, painter);
+    // }
 }
 
 pub fn format_float(value: f64) -> String {
