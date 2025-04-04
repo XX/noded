@@ -38,7 +38,7 @@ impl PrimitiveNode {
         }
     }
 
-    pub fn as_sphere_node(&mut self) -> &mut SphereNode {
+    pub fn as_sphere_mut(&mut self) -> &mut SphereNode {
         match self {
             Self::Sphere(sphere) => sphere,
         }
@@ -85,21 +85,21 @@ impl SphereNode {
                 const LABEL: &str = "Center";
 
                 let remote_value = vector_input_remote_value(pin, snarl, LABEL);
-                let node = snarl[pin.id.node].as_primitive_node().as_sphere_node();
+                let node = snarl[pin.id.node].as_primitive_mut().as_sphere_mut();
                 vector_input_view(ui, LABEL, &mut node.center, remote_value)
             },
             1 => {
                 const LABEL: &str = "Radius";
 
                 let remote_value = number_input_remote_value(pin, snarl, LABEL);
-                let node = snarl[pin.id.node].as_primitive_node().as_sphere_node();
+                let node = snarl[pin.id.node].as_primitive_mut().as_sphere_mut();
                 number_input_view(ui, LABEL, &mut node.radius, remote_value)
             },
             2 => {
                 const LABEL: &str = "Material";
 
                 let remote_value = material_input_remote_value(pin, snarl, LABEL);
-                let node = snarl[pin.id.node].as_primitive_node().as_sphere_node();
+                let node = snarl[pin.id.node].as_primitive_mut().as_sphere_mut();
                 material_input_view(ui, LABEL, &mut node.material, remote_value)
             },
             _ => unreachable!(),

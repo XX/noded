@@ -1,15 +1,16 @@
-use eframe::CreationContext;
+use eframe::egui_wgpu::RenderState;
 use egui::epaint::Hsva;
 use egui::{Color32, Ui};
 use egui_snarl::ui::{AnyPins, PinInfo, SnarlViewer, WireStyle};
 use egui_snarl::{InPin, InPinId, NodeId, OutPin, OutPinId, Snarl};
 
 use super::material::LambertianNode;
+use super::render::raytracer::RaytracerRenderNode;
+use super::render::triangle::TriangleRenderNode;
 use super::{
     CameraNode, DielectricNode, MaterialNode, MetalNode, Node, OutputNode, PrimitiveNode, RenderNode, SphereNode,
 };
 use crate::node::expression::ExpressionNode;
-use crate::render::Custom3d;
 use crate::types::{Color, NodePin, Vector3};
 use crate::widget::color_picker::{Alpha, color_button, color_edit_button_srgba};
 
@@ -19,24 +20,57 @@ pub const VECTOR_COLOR: Color32 = Color32::from_rgb(0x00, 0x00, 0xb0);
 pub const MATERIAL_COLOR: Color32 = Color32::from_rgb(0xb0, 0x00, 0xb0);
 pub const UNTYPED_COLOR: Color32 = Color32::from_rgb(0xb0, 0xb0, 0xb0);
 
+pub struct NodeConfig {
+    pub render_state: RenderState,
+}
+
 pub struct NodeViewer {
-    paint: Custom3d,
+    config: NodeConfig,
+    render: Option<NodeId>,
 }
 
 impl NodeViewer {
-    pub fn new(cx: &CreationContext) -> Self {
+    pub fn new(render_state: RenderState, snarl: &Snarl<Node>) -> Self {
+        let mut render = None;
+
+        for (from_pin, to_pin) in snarl.wires() {
+            if snarl[to_pin.node].output_ref().is_some() {
+                if let Some(render_node) = snarl[from_pin.node].render_ref() {
+                    render_node.register(&render_state);
+                    render = Some(from_pin.node);
+                }
+            }
+        }
+
         Self {
-            paint: Custom3d::new(cx),
+            render,
+            config: NodeConfig { render_state },
         }
     }
 
-    pub fn draw(&mut self, viewport: &egui::Rect, painter: &egui::Painter) {
-        self.paint.draw(*viewport, painter);
+    pub fn draw(&mut self, viewport: &egui::Rect, painter: &egui::Painter, snarl: &mut Snarl<Node>) {
+        if let Some(id) = self.render {
+            if let Some(RenderNode::Triangle(render)) = snarl.get_node(id).and_then(Node::render_ref) {
+                render.draw(*viewport, painter);
+            }
+        }
     }
 
-    pub fn after_show(&mut self, _ui: &mut Ui, response: &egui::Response) {
-        let drag = response.drag_delta().x;
-        self.paint.recalc_angle(drag);
+    pub fn after_show(&mut self, _ui: &mut Ui, response: &egui::Response, snarl: &mut Snarl<Node>) {
+        if let Some(id) = self.render {
+            if let RenderNode::Triangle(render) = snarl[id].as_render_mut() {
+                let drag = response.drag_delta().x;
+                render.recalc_angle(drag as _);
+            }
+        }
+    }
+
+    fn unregister_render(&mut self, snarl: &mut Snarl<Node>) {
+        if let Some(id) = self.render.take() {
+            if let Some(render_node) = snarl.get_node(id).and_then(Node::render_ref) {
+                render_node.unregister(&self.config.render_state);
+            }
+        }
     }
 }
 
@@ -50,6 +84,12 @@ impl SnarlViewer<Node> for NodeViewer {
             }
 
             snarl.connect(from.id, to.id);
+            if snarl[to.id.node].output_ref().is_some() {
+                if let Some(render_node) = snarl[from.id.node].render_ref() {
+                    render_node.register(&self.config.render_state);
+                    self.render = Some(from.id.node);
+                }
+            }
         }
     }
 
@@ -57,6 +97,9 @@ impl SnarlViewer<Node> for NodeViewer {
     fn disconnect(&mut self, from: &OutPin, to: &InPin, snarl: &mut Snarl<Node>) {
         snarl[to.id.node].disconnect_input(to.id.input);
         snarl.disconnect(from.id, to.id);
+        if self.render == Some(from.id.node) {
+            self.unregister_render(snarl);
+        }
     }
 
     #[inline]
@@ -86,7 +129,8 @@ impl SnarlViewer<Node> for NodeViewer {
             Node::Primitive(PrimitiveNode::Sphere(_)) => SphereNode::show_input(pin, ui, snarl),
             Node::Collection(collection) => collection.show_input(pin, ui),
             Node::Camera(_) => CameraNode::show_input(pin, ui, snarl),
-            Node::Render(_) => RenderNode::show_input(pin, ui, snarl),
+            Node::Render(RenderNode::Triangle(_)) => TriangleRenderNode::show_input(pin, ui, snarl),
+            Node::Render(RenderNode::Raytracer(_)) => RaytracerRenderNode::show_input(pin, ui, snarl),
             Node::Output(_) => OutputNode::show_input(pin, ui, snarl),
             Node::Number(_) => {
                 unreachable!("{} node has no inputs", Node::NUMBER_NAME)
@@ -157,7 +201,7 @@ impl SnarlViewer<Node> for NodeViewer {
         ui.label("Add node");
         for (name, factory, ..) in Node::fabrics() {
             if ui.button(name).clicked() {
-                snarl.insert_node(pos, factory());
+                snarl.insert_node(pos, factory(&self.config));
                 ui.close_menu();
             }
         }
@@ -183,7 +227,7 @@ impl SnarlViewer<Node> for NodeViewer {
                     for (name, factory, idx) in dst_in_candidates {
                         if ui.button(name).clicked() {
                             // Create new node.
-                            let node = snarl.insert_node(pos, factory());
+                            let node = snarl.insert_node(pos, factory(&self.config));
                             let dst_pin = InPinId { node, input: idx };
 
                             // Connect the wire.
@@ -206,7 +250,7 @@ impl SnarlViewer<Node> for NodeViewer {
                     for (name, factory, idx) in dst_out_candidates {
                         if ui.button(name).clicked() {
                             // Create new node.
-                            let node = snarl.insert_node(pos, factory());
+                            let node = snarl.insert_node(pos, factory(&self.config));
                             let dst_pin = OutPinId { node, output: idx };
 
                             // Connect the wire.
@@ -226,7 +270,7 @@ impl SnarlViewer<Node> for NodeViewer {
 
     fn show_node_menu(
         &mut self,
-        node: NodeId,
+        node_id: NodeId,
         _inputs: &[InPin],
         _outputs: &[OutPin],
         ui: &mut Ui,
@@ -234,7 +278,10 @@ impl SnarlViewer<Node> for NodeViewer {
     ) {
         ui.label("Node menu");
         if ui.button("Remove").clicked() {
-            snarl.remove_node(node);
+            if self.render == Some(node_id) {
+                self.unregister_render(snarl);
+            }
+            snarl.remove_node(node_id);
             ui.close_menu();
         }
     }

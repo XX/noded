@@ -56,21 +56,21 @@ impl MaterialNode {
         }
     }
 
-    pub fn as_metal_node(&mut self) -> &mut MetalNode {
+    pub fn as_metal_mut(&mut self) -> &mut MetalNode {
         match self {
             Self::Metal(metal) => metal,
             node => panic!("Node `{}` is not a `{}`", node.name(), MetalNode::NAME),
         }
     }
 
-    pub fn as_dielectric_node(&mut self) -> &mut DielectricNode {
+    pub fn as_dielectric_mut(&mut self) -> &mut DielectricNode {
         match self {
             Self::Dielectric(dielectric) => dielectric,
             node => panic!("Node `{}` is not a `{}`", node.name(), DielectricNode::NAME),
         }
     }
 
-    pub fn as_lambert_node(&mut self) -> &mut LambertianNode {
+    pub fn as_lambert_mut(&mut self) -> &mut LambertianNode {
         match self {
             Self::Lambertian(lambert) => lambert,
             node => panic!("Node `{}` is not a `{}`", node.name(), LambertianNode::NAME),
@@ -106,14 +106,14 @@ impl MetalNode {
                 const LABEL: &str = "Albedo";
 
                 let remote_value = color_input_remote_value(pin, snarl, LABEL);
-                let node = snarl[pin.id.node].as_material_node().as_metal_node();
+                let node = snarl[pin.id.node].as_material_mut().as_metal_mut();
                 color_input_view(ui, LABEL, &mut node.albedo, remote_value)
             },
             1 => {
                 const LABEL: &str = "Roughness";
 
                 let remote_value = number_input_remote_value(pin, snarl, LABEL);
-                let node = snarl[pin.id.node].as_material_node().as_metal_node();
+                let node = snarl[pin.id.node].as_material_mut().as_metal_mut();
                 number_input_view(ui, LABEL, &mut node.roughness, remote_value)
             },
             _ => unreachable!(),
@@ -153,7 +153,7 @@ impl DielectricNode {
                 const LABEL: &str = "IOR";
 
                 let remote_value = number_input_remote_value(pin, snarl, LABEL);
-                let node = snarl[pin.id.node].as_material_node().as_dielectric_node();
+                let node = snarl[pin.id.node].as_material_mut().as_dielectric_mut();
                 number_input_view(ui, LABEL, &mut node.ior, remote_value)
             },
             _ => unreachable!(),
@@ -200,7 +200,7 @@ impl LambertianNode {
                 const LABEL: &str = "Albedo";
 
                 let remote_value = color_input_remote_value(pin, snarl, LABEL);
-                let node = snarl[pin.id.node].as_material_node().as_lambert_node();
+                let node = snarl[pin.id.node].as_material_mut().as_lambert_mut();
                 color_input_view(ui, LABEL, &mut node.albedo, remote_value)
             },
             _ => unreachable!(),

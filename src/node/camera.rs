@@ -47,42 +47,42 @@ impl CameraNode {
                 const LABEL: &str = "Position";
 
                 let remote_value = vector_input_remote_value(pin, snarl, LABEL);
-                let node = snarl[pin.id.node].as_camera_node();
+                let node = snarl[pin.id.node].as_camera_mut();
                 vector_input_view(ui, LABEL, &mut node.position, remote_value)
             },
             1 => {
                 const LABEL: &str = "Yaw";
 
                 let remote_value = number_input_remote_value(pin, snarl, LABEL);
-                let node = snarl[pin.id.node].as_camera_node();
+                let node = snarl[pin.id.node].as_camera_mut();
                 number_input_view(ui, LABEL, &mut node.yaw, remote_value)
             },
             2 => {
                 const LABEL: &str = "Pitch";
 
                 let remote_value = number_input_remote_value(pin, snarl, LABEL);
-                let node = snarl[pin.id.node].as_camera_node();
+                let node = snarl[pin.id.node].as_camera_mut();
                 number_input_view(ui, LABEL, &mut node.pitch, remote_value)
             },
             3 => {
                 const LABEL: &str = "VFOV";
 
                 let remote_value = number_input_remote_value(pin, snarl, LABEL);
-                let node = snarl[pin.id.node].as_camera_node();
+                let node = snarl[pin.id.node].as_camera_mut();
                 number_input_view(ui, LABEL, &mut node.vfov_degrees, remote_value)
             },
             4 => {
                 const LABEL: &str = "Aperture";
 
                 let remote_value = number_input_remote_value(pin, snarl, LABEL);
-                let node = snarl[pin.id.node].as_camera_node();
+                let node = snarl[pin.id.node].as_camera_mut();
                 number_input_view(ui, LABEL, &mut node.aperture, remote_value)
             },
             5 => {
                 const LABEL: &str = "Focus Distance";
 
                 let remote_value = number_input_remote_value(pin, snarl, LABEL);
-                let node = snarl[pin.id.node].as_camera_node();
+                let node = snarl[pin.id.node].as_camera_mut();
                 number_input_view(ui, LABEL, &mut node.focus_distance, remote_value)
             },
             6 => {

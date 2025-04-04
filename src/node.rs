@@ -1,22 +1,26 @@
 use bitflags::bitflags;
 use egui::Ui;
 use egui_snarl::ui::PinInfo;
-use egui_snarl::{InPin, NodeId, Snarl};
+use egui_snarl::{InPin, Snarl};
+use render::raytracer::RaytracerRenderNode;
 use serde::{Deserialize, Serialize};
-use viewer::empty_input_view;
 
 use self::camera::CameraNode;
 use self::collection::CollectionNode;
 use self::expression::ExpressionNode;
 use self::material::{DielectricNode, LambertianNode, MaterialNode, MetalNode};
 use self::primitive::{PrimitiveNode, SphereNode};
-use crate::types::{Color, NodePin, Vector3};
+use self::render::RenderNode;
+use self::render::triangle::TriangleRenderNode;
+use self::viewer::{NodeConfig, empty_input_view};
+use crate::types::{Color, Vector3};
 
 pub mod camera;
 pub mod collection;
 pub mod expression;
 pub mod material;
 pub mod primitive;
+pub mod render;
 pub mod viewer;
 
 bitflags! {
@@ -32,8 +36,12 @@ bitflags! {
 
         const COLLECTION = Self::PRIMITIVE_SPHERE.bits() << 1;
         const CAMERA = Self::COLLECTION.bits() << 1;
-        const RENDER = Self::CAMERA.bits() << 1;
-        const OUTPUT = Self::RENDER.bits() << 1;
+
+        const RENDER_TRIANGLE = Self::CAMERA.bits() << 1;
+        const RENDER_RAYTRACER = Self::RENDER_TRIANGLE.bits() << 1;
+        const RENDERS = Self::RENDER_TRIANGLE.bits() | Self::RENDER_RAYTRACER.bits();
+
+        const OUTPUT = Self::RENDER_RAYTRACER.bits() << 1;
 
         const NUMBER = Self::OUTPUT.bits() << 1;
         const STRING = Self::NUMBER.bits() << 1;
@@ -76,72 +84,79 @@ impl Node {
     const VECTOR_NAME: &str = "Vector";
     const VECTOR_OUTPUTS: [u64; 1] = [NodeFlags::VECTOR.bits()];
 
-    pub fn fabrics() -> impl IntoIterator<Item = (&'static str, fn() -> Node, &'static [u64], &'static [u64])> {
+    pub fn fabrics() -> impl IntoIterator<Item = (&'static str, fn(&NodeConfig) -> Node, &'static [u64], &'static [u64])>
+    {
         [
             (
                 MetalNode::NAME,
-                (|| Node::Material(MaterialNode::Metal(MetalNode::default()))) as fn() -> Node,
+                (|_| Node::Material(MaterialNode::Metal(MetalNode::default()))) as fn(&NodeConfig) -> Node,
                 MetalNode::INPUTS.as_slice(),
                 MetalNode::OUTPUTS.as_slice(),
             ),
             (
                 DielectricNode::NAME,
-                || Node::Material(MaterialNode::Dielectric(DielectricNode::default())),
+                |_| Node::Material(MaterialNode::Dielectric(DielectricNode::default())),
                 DielectricNode::INPUTS.as_slice(),
                 DielectricNode::OUTPUTS.as_slice(),
             ),
             (
                 SphereNode::NAME,
-                || Node::Primitive(PrimitiveNode::Sphere(SphereNode::default())),
+                |_| Node::Primitive(PrimitiveNode::Sphere(SphereNode::default())),
                 SphereNode::INPUTS.as_slice(),
                 SphereNode::OUTPUTS.as_slice(),
             ),
             (
                 CollectionNode::NAME,
-                || Node::Collection(CollectionNode::default()),
+                |_| Node::Collection(CollectionNode::default()),
                 &[],
                 CollectionNode::OUTPUTS.as_slice(),
             ),
             (
                 CameraNode::NAME,
-                || Node::Camera(CameraNode::default()),
+                |_| Node::Camera(CameraNode::default()),
                 CameraNode::INPUTS.as_slice(),
                 CameraNode::OUTPUTS.as_slice(),
             ),
             (
-                RenderNode::NAME,
-                || Node::Render(RenderNode::default()),
-                RenderNode::INPUTS.as_slice(),
-                RenderNode::OUTPUTS.as_slice(),
+                TriangleRenderNode::NAME,
+                |_| Node::Render(RenderNode::Triangle(TriangleRenderNode::default())),
+                TriangleRenderNode::INPUTS.as_slice(),
+                TriangleRenderNode::OUTPUTS.as_slice(),
+            ),
+            (
+                RaytracerRenderNode::NAME,
+                |_| Node::Render(RenderNode::Raytracer(RaytracerRenderNode::default())),
+                RaytracerRenderNode::INPUTS.as_slice(),
+                RaytracerRenderNode::OUTPUTS.as_slice(),
             ),
             (
                 OutputNode::NAME,
-                || Node::Output(OutputNode::default()),
+                |_| Node::Output(OutputNode::default()),
                 OutputNode::INPUTS.as_slice(),
                 OutputNode::OUTPUTS.as_slice(),
             ),
-            (Self::NUMBER_NAME, || Node::Number(0.0), &[], &Self::NUMBER_OUTPUTS),
+            (Self::NUMBER_NAME, |_| Node::Number(0.0), &[], &Self::NUMBER_OUTPUTS),
             (
                 Self::STRING_NAME,
-                || Node::String(String::new()),
+                |_| Node::String(String::new()),
                 &[],
                 &Self::STRING_OUTPUTS,
             ),
             (
                 Self::COLOR_NAME,
-                || Node::Color(Color::default()),
+                |_| Node::Color(Color::default()),
                 &[],
                 &Self::COLOR_OUTPUTS,
             ),
             (
                 Self::VECTOR_NAME,
-                || Node::Vector(Vector3::default()),
+                |_| Node::Vector(Vector3::default()),
                 &[],
                 &Self::VECTOR_OUTPUTS,
             ),
             (
                 ExpressionNode::NAME,
-                || Node::Expression(ExpressionNode::new()),
+                |_| Node::Expression(ExpressionNode::new()),
                 ExpressionNode::INPUTS.as_slice(),
                 ExpressionNode::OUTPUTS.as_slice(),
             ),
@@ -156,7 +171,8 @@ impl Node {
             Self::Primitive(PrimitiveNode::Sphere(_)) => SphereNode::NAME,
             Self::Collection(_) => CollectionNode::NAME,
             Self::Camera(_) => CameraNode::NAME,
-            Self::Render(_) => RenderNode::NAME,
+            Self::Render(RenderNode::Triangle(_)) => TriangleRenderNode::NAME,
+            Self::Render(RenderNode::Raytracer(_)) => RaytracerRenderNode::NAME,
             Self::Output(_) => OutputNode::NAME,
             Self::Number(_) => Self::NUMBER_NAME,
             Self::String(_) => Self::STRING_NAME,
@@ -233,84 +249,52 @@ impl Node {
         }
     }
 
-    fn as_material_node(&mut self) -> &mut MaterialNode {
+    fn as_material_mut(&mut self) -> &mut MaterialNode {
         match self {
             Self::Material(material_node) => material_node,
             node => panic!("Node `{}` is not a `{}`", node.name(), MaterialNode::NAME),
         }
     }
 
-    fn as_primitive_node(&mut self) -> &mut PrimitiveNode {
+    fn as_primitive_mut(&mut self) -> &mut PrimitiveNode {
         match self {
             Self::Primitive(primitive_node) => primitive_node,
             node => panic!("Node `{}` is not a `{}`", node.name(), PrimitiveNode::NAME),
         }
     }
 
-    fn as_camera_node(&mut self) -> &mut CameraNode {
+    fn as_camera_mut(&mut self) -> &mut CameraNode {
         match self {
             Self::Camera(camera_node) => camera_node,
             node => panic!("Node `{}` is not a `{}`", node.name(), CameraNode::NAME),
         }
     }
 
-    fn as_expression_node(&mut self) -> &mut ExpressionNode {
+    fn render_ref(&self) -> Option<&RenderNode> {
+        match self {
+            Self::Render(render_node) => Some(render_node),
+            _ => None,
+        }
+    }
+
+    fn as_render_mut(&mut self) -> &mut RenderNode {
+        match self {
+            Self::Render(render_node) => render_node,
+            node => panic!("Node `{}` is not an `{}`", node.name(), RenderNode::NAME),
+        }
+    }
+
+    fn output_ref(&self) -> Option<&OutputNode> {
+        match self {
+            Self::Output(output_node) => Some(output_node),
+            _ => None,
+        }
+    }
+
+    fn as_expression_mut(&mut self) -> &mut ExpressionNode {
         match self {
             Self::Expression(expr_node) => expr_node,
             node => panic!("Node `{}` is not an `{}`", node.name(), ExpressionNode::NAME),
-        }
-    }
-}
-
-#[derive(Clone, Default, Serialize, Deserialize)]
-pub struct RenderNode {
-    camera: NodePin<Option<NodeId>>,
-}
-
-impl RenderNode {
-    pub const NAME: &str = "Render";
-    pub const INPUTS: [u64; 1] = [NodeFlags::CAMERA.bits()];
-    pub const OUTPUTS: [u64; 1] = [NodeFlags::RENDER.bits()];
-
-    pub fn inputs(&self) -> &[u64] {
-        &Self::INPUTS
-    }
-
-    pub fn outputs(&self) -> &[u64] {
-        &Self::OUTPUTS
-    }
-
-    pub fn show_input(pin: &InPin, ui: &mut Ui, snarl: &mut Snarl<Node>) -> PinInfo {
-        match pin.id.input {
-            0 => {
-                const LABEL: &str = "Camera";
-
-                let remote_value = match &*pin.remotes {
-                    [] => None,
-                    [remote] => Some(match &snarl[remote.node] {
-                        Node::Camera(_) => Some(remote.node),
-                        node => unreachable!("{LABEL} input not suppor connection with `{}`", node.name()),
-                    }),
-                    _ => None,
-                };
-
-                if let Some(value) = remote_value {
-                    let Node::Render(node) = &mut snarl[pin.id.node] else {
-                        panic!()
-                    };
-                    node.camera.set(value);
-                }
-
-                empty_input_view(ui, LABEL)
-            },
-            _ => unreachable!(),
-        }
-    }
-
-    pub fn disconnect_input(&mut self, input: usize) {
-        match input {
-            0 => self.camera.reset(),
-            _ => unreachable!(),
         }
     }
 }
@@ -320,7 +304,7 @@ pub struct OutputNode;
 
 impl OutputNode {
     pub const NAME: &str = "Output";
-    pub const INPUTS: [u64; 1] = [NodeFlags::RENDER.bits()];
+    pub const INPUTS: [u64; 1] = [NodeFlags::RENDERS.bits()];
     pub const OUTPUTS: [u64; 0] = [];
 
     pub fn inputs(&self) -> &[u64] {

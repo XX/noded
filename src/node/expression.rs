@@ -79,7 +79,7 @@ impl ExpressionNode {
                 };
 
                 if changed {
-                    let node = snarl[pin.id.node].as_expression_node();
+                    let node = snarl[pin.id.node].as_expression_mut();
 
                     if let Ok(expr) = syn::parse_str(&node.text) {
                         node.expr = expr;
@@ -136,17 +136,17 @@ impl ExpressionNode {
                     .with_wire_style(WireStyle::AxisAligned { corner_radius: 10.0 })
             },
             idx => {
-                if idx <= snarl[pin.id.node].as_expression_node().bindings.len() {
+                if idx <= snarl[pin.id.node].as_expression_mut().bindings.len() {
                     match &*pin.remotes {
                         [] => {
-                            let node = snarl[pin.id.node].as_expression_node();
+                            let node = snarl[pin.id.node].as_expression_mut();
                             ui.label(&node.bindings[idx - 1]);
                             ui.add(egui::DragValue::new(&mut node.values[idx - 1]));
                             PinInfo::circle().with_fill(NUMBER_COLOR)
                         },
                         [remote] => {
                             let new_value = snarl[remote.node].number_out();
-                            let node = snarl[pin.id.node].as_expression_node();
+                            let node = snarl[pin.id.node].as_expression_mut();
                             ui.label(&node.bindings[idx - 1]);
                             ui.label(format_float(new_value));
                             node.values[idx - 1] = new_value;

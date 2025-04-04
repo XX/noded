@@ -80,11 +80,12 @@ impl NodedApp {
                 .unwrap_or_default()
         });
 
-        NodedApp {
+        let viewer = NodeViewer::new(cx.wgpu_render_state.clone().expect("WGPU must be enabled"), &snarl);
+        Self {
             snarl,
             style,
             settings,
-            viewer: NodeViewer::new(cx),
+            viewer,
         }
     }
 }
@@ -139,7 +140,8 @@ impl App for NodedApp {
                     .max_rect(last_panel_rect)
                     .sense(Sense::empty()),
             );
-            self.viewer.draw(&last_panel_rect, render_area_ui.painter());
+            self.viewer
+                .draw(&last_panel_rect, render_area_ui.painter(), &mut self.snarl);
 
             if self.settings.show_nodes {
                 // Editing area with nodes in the middle
@@ -176,7 +178,7 @@ impl App for NodedApp {
                 let overlay_response =
                     render_area_ui.interact(last_panel_rect, Id::new("overlay_blocker"), Sense::click_and_drag());
 
-                self.viewer.after_show(ui, &overlay_response);
+                self.viewer.after_show(ui, &overlay_response, &mut self.snarl);
             }
         });
     }
