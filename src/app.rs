@@ -25,6 +25,7 @@ impl EditMode {
 
 #[derive(Debug, Deserialize, Serialize, egui_probe::EguiProbe)]
 pub struct AppSettings {
+    pub visible_settings: bool,
     pub edit_mode: EditMode,
     pub editing_nodes_opacity: f32,
     pub viewing_nodes_opacity: f32,
@@ -35,11 +36,12 @@ pub struct AppSettings {
 impl Default for AppSettings {
     fn default() -> Self {
         Self {
+            visible_settings: false,
             edit_mode: EditMode::Editing,
             editing_nodes_opacity: 1.0,
             viewing_nodes_opacity: 0.5,
             show_nodes: true,
-            animation_time: 10.0,
+            animation_time: 0.2,
         }
     }
 }
@@ -114,22 +116,33 @@ impl App for NodedApp {
             });
         });
 
-        egui::SidePanel::left("style").show(ctx, |ui| {
-            // use egui_scale::EguiScale;
-            // ui.style_mut().scale(2.0);
+        if ctx.input(|i| i.key_pressed(Key::N)) {
+            self.settings.visible_settings = !self.settings.visible_settings;
+        }
 
-            egui::ScrollArea::vertical().show(ui, |ui| {
-                egui_probe::Probe::new(&mut self.style).show(ui);
-                egui_probe::Probe::new(&mut self.settings).show(ui);
+        if self.settings.visible_settings {
+            egui::SidePanel::left("style").show(ctx, |ui| {
+                // use egui_scale::EguiScale;
+                // ui.style_mut().scale(2.0);
+
+                egui::ScrollArea::vertical().show(ui, |ui| {
+                    egui_probe::Probe::new(&mut self.style).show(ui);
+                    egui_probe::Probe::new(&mut self.settings).show(ui);
+                });
             });
-        });
+        }
 
         ctx.style_mut(|style| style.animation_time = self.settings.animation_time);
 
         egui::CentralPanel::default().show(ctx, |ui| {
-            if ui.input(|i| i.key_pressed(Key::Tab)) {
-                self.settings.edit_mode.switch();
-            }
+            ui.input(|i| {
+                if i.key_pressed(Key::Tab) {
+                    self.settings.edit_mode.switch();
+                }
+                if i.key_pressed(Key::H) {
+                    self.settings.show_nodes = !self.settings.show_nodes;
+                }
+            });
 
             let last_panel_rect = ui.min_rect();
 
