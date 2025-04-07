@@ -2,7 +2,7 @@ use eframe::egui_wgpu::{Callback, CallbackResources, CallbackTrait, RenderState,
 use eframe::wgpu;
 use egui::{PaintCallbackInfo, Ui};
 use egui_snarl::ui::PinInfo;
-use egui_snarl::{InPin, NodeId, Snarl};
+use egui_snarl::{InPin, NodeId, OutPin, Snarl};
 use serde::{Deserialize, Serialize};
 
 use crate::node::camera::{CameraNode, camera_node_by_id};
@@ -78,7 +78,7 @@ impl RaytracerRenderNode {
 
                 let remote_value =
                     number_input_remote_value(pin, snarl, LABEL).map(|(name, value)| (name, value as u32));
-                let node = snarl[pin.id.node].as_render_mut().as_raytracer_render_mut();
+                let node = snarl[pin.id.node].as_render_node_mut().as_raytracer_render_mut();
                 number_input_view(ui, LABEL, &mut node.max_samples_per_pixel, remote_value)
             },
             1 => {
@@ -86,7 +86,7 @@ impl RaytracerRenderNode {
 
                 let remote_value =
                     number_input_remote_value(pin, snarl, LABEL).map(|(name, value)| (name, value as u32));
-                let node = snarl[pin.id.node].as_render_mut().as_raytracer_render_mut();
+                let node = snarl[pin.id.node].as_render_node_mut().as_raytracer_render_mut();
                 number_input_view(ui, LABEL, &mut node.num_samples_per_pixel, remote_value)
             },
             2 => {
@@ -94,7 +94,7 @@ impl RaytracerRenderNode {
 
                 let remote_value =
                     number_input_remote_value(pin, snarl, LABEL).map(|(name, value)| (name, value as u32));
-                let node = snarl[pin.id.node].as_render_mut().as_raytracer_render_mut();
+                let node = snarl[pin.id.node].as_render_node_mut().as_raytracer_render_mut();
                 number_input_view(ui, LABEL, &mut node.num_bounces, remote_value)
             },
             3 => {
@@ -110,7 +110,7 @@ impl RaytracerRenderNode {
                 };
 
                 if let Some(value) = remote_value {
-                    let node = snarl[pin.id.node].as_render_mut().as_raytracer_render_mut();
+                    let node = snarl[pin.id.node].as_render_node_mut().as_raytracer_render_mut();
                     node.camera.set(value);
                 }
 
@@ -120,8 +120,10 @@ impl RaytracerRenderNode {
         }
     }
 
-    pub fn disconnect_input(&mut self, input: usize) {
-        match input {
+    pub fn connect_input(&mut self, _from: &OutPin, _to: &InPin) {}
+
+    pub fn disconnect_input(&mut self, input_pin: &InPin) {
+        match input_pin.id.input {
             0 => self.max_samples_per_pixel.reset(),
             1 => self.num_samples_per_pixel.reset(),
             2 => self.num_bounces.reset(),

@@ -1,6 +1,6 @@
 use egui::Ui;
 use egui_snarl::ui::PinInfo;
-use egui_snarl::{InPin, Snarl};
+use egui_snarl::{InPin, OutPin, Snarl};
 use serde::{Deserialize, Serialize};
 
 use super::NodeFlags;
@@ -32,9 +32,11 @@ impl PrimitiveNode {
         }
     }
 
-    pub fn disconnect_input(&mut self, input: usize) {
+    pub fn connect_input(&mut self, _from: &OutPin, _to: &InPin) {}
+
+    pub fn disconnect_input(&mut self, input_pin: &InPin) {
         match self {
-            Self::Sphere(sphere) => sphere.disconnect_input(input),
+            Self::Sphere(sphere) => sphere.disconnect_input(input_pin),
         }
     }
 
@@ -85,29 +87,31 @@ impl SphereNode {
                 const LABEL: &str = "Center";
 
                 let remote_value = vector_input_remote_value(pin, snarl, LABEL);
-                let node = snarl[pin.id.node].as_primitive_mut().as_sphere_mut();
+                let node = snarl[pin.id.node].as_primitive_node_mut().as_sphere_mut();
                 vector_input_view(ui, LABEL, &mut node.center, remote_value)
             },
             1 => {
                 const LABEL: &str = "Radius";
 
                 let remote_value = number_input_remote_value(pin, snarl, LABEL);
-                let node = snarl[pin.id.node].as_primitive_mut().as_sphere_mut();
+                let node = snarl[pin.id.node].as_primitive_node_mut().as_sphere_mut();
                 number_input_view(ui, LABEL, &mut node.radius, remote_value)
             },
             2 => {
                 const LABEL: &str = "Material";
 
                 let remote_value = material_input_remote_value(pin, snarl, LABEL);
-                let node = snarl[pin.id.node].as_primitive_mut().as_sphere_mut();
+                let node = snarl[pin.id.node].as_primitive_node_mut().as_sphere_mut();
                 material_input_view(ui, LABEL, &mut node.material, remote_value)
             },
             _ => unreachable!(),
         }
     }
 
-    pub fn disconnect_input(&mut self, input: usize) {
-        match input {
+    pub fn connect_input(&mut self, _input_pin: &InPin) {}
+
+    pub fn disconnect_input(&mut self, input_pin: &InPin) {
+        match input_pin.id.input {
             0 => self.center.reset(),
             1 => self.radius.reset(),
             2 => self.material.reset(),

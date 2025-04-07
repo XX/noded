@@ -1,6 +1,6 @@
 use egui::Ui;
 use egui_snarl::ui::PinInfo;
-use egui_snarl::{InPin, Snarl};
+use egui_snarl::{InPin, OutPin, Snarl};
 use serde::{Deserialize, Serialize};
 
 use super::viewer::{color_input_view, number_input_view};
@@ -48,11 +48,19 @@ impl MaterialNode {
         }
     }
 
-    pub fn disconnect_input(&mut self, input: usize) {
+    pub fn connect_input(&mut self, from: &OutPin, to: &InPin) {
         match self {
-            Self::Metal(metal) => metal.disconnect_input(input),
-            Self::Dielectric(dielectric) => dielectric.disconnect_input(input),
-            Self::Lambertian(lambert) => lambert.disconnect_input(input),
+            Self::Metal(metal) => metal.connect_input(from, to),
+            Self::Dielectric(dielectric) => dielectric.connect_input(from, to),
+            Self::Lambertian(lambert) => lambert.connect_input(from, to),
+        }
+    }
+
+    pub fn disconnect_input(&mut self, input_pin: &InPin) {
+        match self {
+            Self::Metal(metal) => metal.disconnect_input(input_pin),
+            Self::Dielectric(dielectric) => dielectric.disconnect_input(input_pin),
+            Self::Lambertian(lambert) => lambert.disconnect_input(input_pin),
         }
     }
 
@@ -106,22 +114,24 @@ impl MetalNode {
                 const LABEL: &str = "Albedo";
 
                 let remote_value = color_input_remote_value(pin, snarl, LABEL);
-                let node = snarl[pin.id.node].as_material_mut().as_metal_mut();
+                let node = snarl[pin.id.node].as_material_node_mut().as_metal_mut();
                 color_input_view(ui, LABEL, &mut node.albedo, remote_value)
             },
             1 => {
                 const LABEL: &str = "Roughness";
 
                 let remote_value = number_input_remote_value(pin, snarl, LABEL);
-                let node = snarl[pin.id.node].as_material_mut().as_metal_mut();
+                let node = snarl[pin.id.node].as_material_node_mut().as_metal_mut();
                 number_input_view(ui, LABEL, &mut node.roughness, remote_value)
             },
             _ => unreachable!(),
         }
     }
 
-    pub fn disconnect_input(&mut self, input: usize) {
-        match input {
+    pub fn connect_input(&mut self, _from: &OutPin, _to: &InPin) {}
+
+    pub fn disconnect_input(&mut self, input_pin: &InPin) {
+        match input_pin.id.input {
             0 => self.albedo.reset(),
             1 => self.roughness.reset(),
             _ => unreachable!(),
@@ -153,15 +163,17 @@ impl DielectricNode {
                 const LABEL: &str = "IOR";
 
                 let remote_value = number_input_remote_value(pin, snarl, LABEL);
-                let node = snarl[pin.id.node].as_material_mut().as_dielectric_mut();
+                let node = snarl[pin.id.node].as_material_node_mut().as_dielectric_mut();
                 number_input_view(ui, LABEL, &mut node.ior, remote_value)
             },
             _ => unreachable!(),
         }
     }
 
-    pub fn disconnect_input(&mut self, input: usize) {
-        match input {
+    pub fn connect_input(&mut self, _from: &OutPin, _to: &InPin) {}
+
+    pub fn disconnect_input(&mut self, input_pin: &InPin) {
+        match input_pin.id.input {
             0 => self.ior.reset(),
             _ => unreachable!(),
         }
@@ -200,15 +212,17 @@ impl LambertianNode {
                 const LABEL: &str = "Albedo";
 
                 let remote_value = color_input_remote_value(pin, snarl, LABEL);
-                let node = snarl[pin.id.node].as_material_mut().as_lambert_mut();
+                let node = snarl[pin.id.node].as_material_node_mut().as_lambert_mut();
                 color_input_view(ui, LABEL, &mut node.albedo, remote_value)
             },
             _ => unreachable!(),
         }
     }
 
-    pub fn disconnect_input(&mut self, input: usize) {
-        match input {
+    pub fn connect_input(&mut self, _from: &OutPin, _to: &InPin) {}
+
+    pub fn disconnect_input(&mut self, input_pin: &InPin) {
+        match input_pin.id.input {
             0 => self.albedo.reset(),
             _ => unreachable!(),
         }

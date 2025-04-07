@@ -1,7 +1,7 @@
 use bitflags::bitflags;
 use egui::Ui;
 use egui_snarl::ui::PinInfo;
-use egui_snarl::{InPin, Snarl};
+use egui_snarl::{InPin, OutPin, Snarl};
 use render::raytracer::RaytracerRenderNode;
 use serde::{Deserialize, Serialize};
 
@@ -108,7 +108,7 @@ impl Node {
             (
                 CollectionNode::NAME,
                 |_| Node::Collection(CollectionNode::default()),
-                &[],
+                &[CollectionNode::INPUT],
                 CollectionNode::OUTPUTS.as_slice(),
             ),
             (
@@ -218,15 +218,28 @@ impl Node {
         }
     }
 
-    pub fn disconnect_input(&mut self, input: usize) {
+    pub fn connect_input(&mut self, from: &OutPin, to: &InPin) {
         match self {
-            Self::Material(material) => material.disconnect_input(input),
-            Self::Primitive(primitive) => primitive.disconnect_input(input),
-            Self::Collection(collection) => collection.disconnect_input(input),
-            Self::Camera(camera) => camera.disconnect_input(input),
-            Self::Render(render) => render.disconnect_input(input),
-            Self::Output(output) => output.disconnect_input(input),
-            Self::Expression(expression) => expression.disconnect_input(input),
+            Self::Material(material) => material.connect_input(from, to),
+            Self::Primitive(primitive) => primitive.connect_input(from, to),
+            Self::Collection(collection) => collection.connect_input(from, to),
+            Self::Camera(camera) => camera.connect_input(from, to),
+            Self::Render(render) => render.connect_input(from, to),
+            Self::Output(output) => output.connect_input(from, to),
+            Self::Expression(expression) => expression.connect_input(from, to),
+            node => unreachable!("{} node has no inputs", node.name()),
+        }
+    }
+
+    pub fn disconnect_input(&mut self, input_pin: &InPin) {
+        match self {
+            Self::Material(material) => material.disconnect_input(input_pin),
+            Self::Primitive(primitive) => primitive.disconnect_input(input_pin),
+            Self::Collection(collection) => collection.disconnect_input(input_pin),
+            Self::Camera(camera) => camera.disconnect_input(input_pin),
+            Self::Render(render) => render.disconnect_input(input_pin),
+            Self::Output(output) => output.disconnect_input(input_pin),
+            Self::Expression(expression) => expression.disconnect_input(input_pin),
             node => unreachable!("{} node has no inputs", node.name()),
         }
     }
@@ -253,70 +266,77 @@ impl Node {
         }
     }
 
-    fn as_material_mut(&mut self) -> &mut MaterialNode {
+    fn as_material_node_mut(&mut self) -> &mut MaterialNode {
         match self {
             Self::Material(material_node) => material_node,
             node => panic!("Node `{}` is not a `{}`", node.name(), MaterialNode::NAME),
         }
     }
 
-    fn as_primitive_mut(&mut self) -> &mut PrimitiveNode {
+    fn as_primitive_node_mut(&mut self) -> &mut PrimitiveNode {
         match self {
             Self::Primitive(primitive_node) => primitive_node,
             node => panic!("Node `{}` is not a `{}`", node.name(), PrimitiveNode::NAME),
         }
     }
 
-    fn camera_ref(&self) -> Option<&CameraNode> {
+    fn collection_node_ref(&self) -> Option<&CollectionNode> {
+        match self {
+            Self::Collection(collection_node) => Some(collection_node),
+            _ => None,
+        }
+    }
+
+    fn camera_node_ref(&self) -> Option<&CameraNode> {
         match self {
             Self::Camera(camera_node) => Some(camera_node),
             _ => None,
         }
     }
 
-    fn camera_mut(&mut self) -> Option<&mut CameraNode> {
+    fn camera_node_mut(&mut self) -> Option<&mut CameraNode> {
         match self {
             Self::Camera(camera_node) => Some(camera_node),
             _ => None,
         }
     }
 
-    fn as_camera(&self) -> &CameraNode {
+    fn as_camera_node(&self) -> &CameraNode {
         match self {
             Self::Camera(camera_node) => camera_node,
             node => panic!("Node `{}` is not a `{}`", node.name(), CameraNode::NAME),
         }
     }
 
-    fn as_camera_mut(&mut self) -> &mut CameraNode {
+    fn as_camera_node_mut(&mut self) -> &mut CameraNode {
         match self {
             Self::Camera(camera_node) => camera_node,
             node => panic!("Node `{}` is not a `{}`", node.name(), CameraNode::NAME),
         }
     }
 
-    fn render_ref(&self) -> Option<&RenderNode> {
+    fn render_node_ref(&self) -> Option<&RenderNode> {
         match self {
             Self::Render(render_node) => Some(render_node),
             _ => None,
         }
     }
 
-    fn as_render_mut(&mut self) -> &mut RenderNode {
+    fn as_render_node_mut(&mut self) -> &mut RenderNode {
         match self {
             Self::Render(render_node) => render_node,
             node => panic!("Node `{}` is not an `{}`", node.name(), RenderNode::NAME),
         }
     }
 
-    fn output_ref(&self) -> Option<&OutputNode> {
+    fn output_node_ref(&self) -> Option<&OutputNode> {
         match self {
             Self::Output(output_node) => Some(output_node),
             _ => None,
         }
     }
 
-    fn as_expression_mut(&mut self) -> &mut ExpressionNode {
+    fn as_expression_node_mut(&mut self) -> &mut ExpressionNode {
         match self {
             Self::Expression(expr_node) => expr_node,
             node => panic!("Node `{}` is not an `{}`", node.name(), ExpressionNode::NAME),
@@ -347,5 +367,7 @@ impl OutputNode {
         }
     }
 
-    pub fn disconnect_input(&mut self, _input: usize) {}
+    pub fn connect_input(&mut self, _from: &OutPin, _to: &InPin) {}
+
+    pub fn disconnect_input(&mut self, _input_pin: &InPin) {}
 }

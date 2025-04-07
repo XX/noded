@@ -2,7 +2,7 @@ use eframe::egui_wgpu::{Callback, CallbackResources, CallbackTrait, RenderState,
 use eframe::wgpu::util::DeviceExt;
 use egui::{PaintCallbackInfo, Ui};
 use egui_snarl::ui::PinInfo;
-use egui_snarl::{InPin, Snarl};
+use egui_snarl::{InPin, OutPin, Snarl};
 use serde::{Deserialize, Serialize};
 
 use crate::node::viewer::{number_input_remote_value, number_input_view};
@@ -33,15 +33,17 @@ impl TriangleRenderNode {
                 const LABEL: &str = "Angle";
 
                 let remote_value = number_input_remote_value(pin, snarl, LABEL);
-                let node = snarl[pin.id.node].as_render_mut().as_triangle_render_mut();
+                let node = snarl[pin.id.node].as_render_node_mut().as_triangle_render_mut();
                 number_input_view(ui, LABEL, &mut node.angle, remote_value)
             },
             _ => unreachable!(),
         }
     }
 
-    pub fn disconnect_input(&mut self, input: usize) {
-        match input {
+    pub fn connect_input(&mut self, _from: &OutPin, _to: &InPin) {}
+
+    pub fn disconnect_input(&mut self, input_pin: &InPin) {
+        match input_pin.id.input {
             0 => self.angle.reset(),
             _ => unreachable!(),
         }
@@ -59,13 +61,6 @@ impl TriangleRenderNode {
 impl TriangleRenderNode {
     pub fn recalc_angle(&mut self, drag: f64) {
         self.angle.set(self.angle.get() + drag * 0.01);
-    }
-
-    pub fn custom_painting(&mut self, ui: &mut egui::Ui) {
-        let (rect, response) = ui.allocate_exact_size(egui::Vec2::splat(300.0), egui::Sense::drag());
-
-        self.recalc_angle(response.drag_delta().x as _);
-        self.draw(rect, ui.painter());
     }
 
     pub fn draw(&self, viewport: egui::Rect, painter: &egui::Painter) {

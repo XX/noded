@@ -1,6 +1,6 @@
 use egui::{InputState, Key, Pos2, Ui, Vec2};
 use egui_snarl::ui::PinInfo;
-use egui_snarl::{InPin, NodeId, Snarl};
+use egui_snarl::{InPin, NodeId, OutPin, Snarl};
 use serde::{Deserialize, Serialize};
 
 use crate::node::viewer::{
@@ -73,42 +73,42 @@ impl CameraNode {
                 const LABEL: &str = "Position";
 
                 let remote_value = vector_input_remote_value(pin, snarl, LABEL);
-                let node = snarl[pin.id.node].as_camera_mut();
+                let node = snarl[pin.id.node].as_camera_node_mut();
                 vector_input_view(ui, LABEL, &mut node.position, remote_value)
             },
             1 => {
                 const LABEL: &str = "Yaw";
 
                 let remote_value = number_input_remote_value(pin, snarl, LABEL);
-                let node = snarl[pin.id.node].as_camera_mut();
+                let node = snarl[pin.id.node].as_camera_node_mut();
                 as_number_input_view(ui, LABEL, &mut node.yaw, remote_value)
             },
             2 => {
                 const LABEL: &str = "Pitch";
 
                 let remote_value = number_input_remote_value(pin, snarl, LABEL);
-                let node = snarl[pin.id.node].as_camera_mut();
+                let node = snarl[pin.id.node].as_camera_node_mut();
                 as_number_input_view(ui, LABEL, &mut node.pitch, remote_value)
             },
             3 => {
                 const LABEL: &str = "VFOV";
 
                 let remote_value = number_input_remote_value(pin, snarl, LABEL);
-                let node = snarl[pin.id.node].as_camera_mut();
+                let node = snarl[pin.id.node].as_camera_node_mut();
                 as_number_input_view(ui, LABEL, &mut node.vfov, remote_value)
             },
             4 => {
                 const LABEL: &str = "Aperture";
 
                 let remote_value = number_input_remote_value(pin, snarl, LABEL);
-                let node = snarl[pin.id.node].as_camera_mut();
+                let node = snarl[pin.id.node].as_camera_node_mut();
                 number_input_view(ui, LABEL, &mut node.aperture, remote_value)
             },
             5 => {
                 const LABEL: &str = "Focus Distance";
 
                 let remote_value = number_input_remote_value(pin, snarl, LABEL);
-                let node = snarl[pin.id.node].as_camera_mut();
+                let node = snarl[pin.id.node].as_camera_node_mut();
                 number_input_view(ui, LABEL, &mut node.focus_distance, remote_value)
             },
             6 => {
@@ -137,8 +137,10 @@ impl CameraNode {
         }
     }
 
-    pub fn disconnect_input(&mut self, input: usize) {
-        match input {
+    pub fn connect_input(&mut self, _from: &OutPin, _to: &InPin) {}
+
+    pub fn disconnect_input(&mut self, input_pin: &InPin) {
+        match input_pin.id.input {
             0 => self.position.reset(),
             1 => self.yaw.reset(),
             2 => self.pitch.reset(),
@@ -265,5 +267,5 @@ impl CameraNode {
 }
 
 pub fn camera_node_by_id(camera_id: NodeId, snarl: &Snarl<Node>) -> Option<&CameraNode> {
-    snarl.get_node(camera_id).and_then(Node::camera_ref)
+    snarl.get_node(camera_id).and_then(Node::camera_node_ref)
 }

@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use egui::{Color32, Ui};
 use egui_snarl::ui::{PinInfo, WireStyle};
-use egui_snarl::{InPin, InPinId, Snarl};
+use egui_snarl::{InPin, InPinId, OutPin, Snarl};
 
 use super::viewer::{NUMBER_COLOR, STRING_COLOR, format_float};
 use super::{Node, NodeFlags};
@@ -79,7 +79,7 @@ impl ExpressionNode {
                 };
 
                 if changed {
-                    let node = snarl[pin.id.node].as_expression_mut();
+                    let node = snarl[pin.id.node].as_expression_node_mut();
 
                     if let Ok(expr) = syn::parse_str(&node.text) {
                         node.expr = expr;
@@ -136,17 +136,17 @@ impl ExpressionNode {
                     .with_wire_style(WireStyle::AxisAligned { corner_radius: 10.0 })
             },
             idx => {
-                if idx <= snarl[pin.id.node].as_expression_mut().bindings.len() {
+                if idx <= snarl[pin.id.node].as_expression_node_mut().bindings.len() {
                     match &*pin.remotes {
                         [] => {
-                            let node = snarl[pin.id.node].as_expression_mut();
+                            let node = snarl[pin.id.node].as_expression_node_mut();
                             ui.label(&node.bindings[idx - 1]);
                             ui.add(egui::DragValue::new(&mut node.values[idx - 1]));
                             PinInfo::circle().with_fill(NUMBER_COLOR)
                         },
                         [remote] => {
                             let new_value = snarl[remote.node].number_out();
-                            let node = snarl[pin.id.node].as_expression_mut();
+                            let node = snarl[pin.id.node].as_expression_node_mut();
                             ui.label(&node.bindings[idx - 1]);
                             ui.label(format_float(new_value));
                             node.values[idx - 1] = new_value;
@@ -162,7 +162,9 @@ impl ExpressionNode {
         }
     }
 
-    pub fn disconnect_input(&mut self, _input: usize) {}
+    pub fn connect_input(&mut self, _from: &OutPin, _to: &InPin) {}
+
+    pub fn disconnect_input(&mut self, _input_pin: &InPin) {}
 }
 
 #[derive(Clone, Copy, serde::Serialize, serde::Deserialize)]

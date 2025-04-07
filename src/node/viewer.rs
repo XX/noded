@@ -1,7 +1,7 @@
 use eframe::egui_wgpu::RenderState;
 use egui::emath::Numeric;
 use egui::epaint::Hsva;
-use egui::{Color32, Ui};
+use egui::{Color32, Ui, WidgetText};
 use egui_snarl::ui::{AnyPins, PinInfo, SnarlViewer, WireStyle};
 use egui_snarl::{InPin, InPinId, NodeId, OutPin, OutPinId, Snarl};
 
@@ -36,8 +36,8 @@ impl NodeViewer {
         let mut render = None;
 
         for (from_pin, to_pin) in snarl.wires() {
-            if snarl[to_pin.node].output_ref().is_some() {
-                if let Some(render_node) = snarl[from_pin.node].render_ref() {
+            if snarl[to_pin.node].output_node_ref().is_some() {
+                if let Some(render_node) = snarl[from_pin.node].render_node_ref() {
                     render_node.register(&render_state);
                     render = Some(from_pin.node);
                 }
@@ -55,7 +55,7 @@ impl NodeViewer {
 
     pub fn draw(&mut self, viewport: &egui::Rect, painter: &egui::Painter, snarl: &mut Snarl<Node>) {
         if let Some(id) = self.render {
-            match snarl.get_node(id).and_then(Node::render_ref) {
+            match snarl.get_node(id).and_then(Node::render_node_ref) {
                 Some(RenderNode::Triangle(render)) => {
                     render.draw(*viewport, painter);
                 },
@@ -69,7 +69,7 @@ impl NodeViewer {
 
     pub fn after_show(&mut self, ui: &mut Ui, response: &egui::Response, snarl: &mut Snarl<Node>) {
         if let Some(id) = self.render {
-            match snarl[id].as_render_mut() {
+            match snarl[id].as_render_node_mut() {
                 RenderNode::Triangle(render) => {
                     let drag = response.drag_delta().x;
                     render.recalc_angle(drag as _);
@@ -78,7 +78,7 @@ impl NodeViewer {
                     // let camera_id = render.camera_id();
                     if let Some(camera) = render
                         .camera_id()
-                        .and_then(|camera_id| snarl.get_node_mut(camera_id).and_then(Node::camera_mut))
+                        .and_then(|camera_id| snarl.get_node_mut(camera_id).and_then(Node::camera_node_mut))
                     {
                         ui.input(|i| camera.after_events(i));
                     }
@@ -90,7 +90,7 @@ impl NodeViewer {
 
     fn unregister_render(&mut self, snarl: &mut Snarl<Node>) {
         if let Some(id) = self.render.take() {
-            if let Some(render_node) = snarl.get_node(id).and_then(Node::render_ref) {
+            if let Some(render_node) = snarl.get_node(id).and_then(Node::render_node_ref) {
                 render_node.unregister(&self.config.render_state);
             }
         }
@@ -103,12 +103,16 @@ impl SnarlViewer<Node> for NodeViewer {
         // Validate connection
         if snarl[from.id.node].outputs()[from.id.output] & snarl[to.id.node].inputs()[to.id.input] != 0 {
             for &remote in &to.remotes {
-                snarl.disconnect(remote, to.id);
+                let out_pin = snarl.out_pin(remote);
+                self.disconnect(&out_pin, to, snarl);
             }
 
             snarl.connect(from.id, to.id);
-            if snarl[to.id.node].output_ref().is_some() {
-                if let Some(render_node) = snarl[from.id.node].render_ref() {
+            snarl[to.id.node].connect_input(from, to);
+            // snarl[from.id.node].connect_output(from, to);
+
+            if snarl[to.id.node].output_node_ref().is_some() {
+                if let Some(render_node) = snarl[from.id.node].render_node_ref() {
                     render_node.register(&self.config.render_state);
                     self.render = Some(from.id.node);
                 }
@@ -118,16 +122,38 @@ impl SnarlViewer<Node> for NodeViewer {
 
     #[inline]
     fn disconnect(&mut self, from: &OutPin, to: &InPin, snarl: &mut Snarl<Node>) {
-        snarl[to.id.node].disconnect_input(to.id.input);
+        snarl[to.id.node].disconnect_input(to);
         snarl.disconnect(from.id, to.id);
+
         if self.render == Some(from.id.node) {
             self.unregister_render(snarl);
+        }
+
+        if let Some(collection_node) = snarl[to.id.node].collection_node_ref() {
+            // Reconnect rest of inputs
+            for input in (to.id.input + 1)..collection_node.inputs().len() {
+                let to_pin_id = InPinId {
+                    node: to.id.node,
+                    input,
+                };
+                let to_pin = snarl.in_pin(to_pin_id);
+
+                for from_pin_id in to_pin.remotes {
+                    snarl.disconnect(from_pin_id, to_pin_id);
+                    snarl.connect(from_pin_id, InPinId {
+                        node: to.id.node,
+                        input: input - 1,
+                    });
+                }
+            }
         }
     }
 
     #[inline]
     fn drop_inputs(&mut self, pin: &InPin, snarl: &mut Snarl<Node>) {
-        snarl[pin.id.node].disconnect_input(pin.id.input);
+        println!("Dropping input");
+        // FIXME: where is this called?
+        snarl[pin.id.node].disconnect_input(pin);
         snarl.drop_inputs(pin.id);
     }
 
@@ -145,12 +171,12 @@ impl SnarlViewer<Node> for NodeViewer {
 
     #[allow(refining_impl_trait)]
     fn show_input(&mut self, pin: &InPin, ui: &mut Ui, snarl: &mut Snarl<Node>) -> PinInfo {
-        match &mut snarl[pin.id.node] {
+        match snarl[pin.id.node] {
             Node::Material(MaterialNode::Metal(_)) => MetalNode::show_input(pin, ui, snarl),
             Node::Material(MaterialNode::Dielectric(_)) => DielectricNode::show_input(pin, ui, snarl),
             Node::Material(MaterialNode::Lambertian(_)) => LambertianNode::show_input(pin, ui, snarl),
             Node::Primitive(PrimitiveNode::Sphere(_)) => SphereNode::show_input(pin, ui, snarl),
-            Node::Collection(collection) => collection.show_input(pin, ui),
+            Node::Collection(ref collection) => collection.show_input(pin, ui, snarl),
             Node::Camera(_) => CameraNode::show_input(pin, ui, snarl),
             Node::Render(RenderNode::Triangle(_)) => TriangleRenderNode::show_input(pin, ui, snarl),
             Node::Render(RenderNode::Raytracer(_)) => RaytracerRenderNode::show_input(pin, ui, snarl),
@@ -237,9 +263,9 @@ impl SnarlViewer<Node> for NodeViewer {
     fn show_dropped_wire_menu(&mut self, pos: egui::Pos2, ui: &mut Ui, src_pins: AnyPins, snarl: &mut Snarl<Node>) {
         ui.label("Add node");
         match src_pins {
-            AnyPins::Out(src_pins) => {
-                for src_pin in src_pins {
-                    let src_out = snarl[src_pin.node].outputs()[src_pin.output];
+            AnyPins::Out(src_pin_ids) => {
+                for src_pin_id in src_pin_ids {
+                    let src_out = snarl[src_pin_id.node].outputs()[src_pin_id.output];
                     let dst_in_candidates = Node::fabrics().into_iter().filter_map(|(name, factory, inputs, _)| {
                         inputs
                             .iter()
@@ -251,18 +277,23 @@ impl SnarlViewer<Node> for NodeViewer {
                         if ui.button(name).clicked() {
                             // Create new node.
                             let node = snarl.insert_node(pos, factory(&self.config));
-                            let dst_pin = InPinId { node, input: idx };
 
                             // Connect the wire.
-                            snarl.connect(*src_pin, dst_pin);
+                            let src_pin = snarl.out_pin(*src_pin_id);
+                            let dst_pin = InPin {
+                                id: InPinId { node, input: idx },
+                                remotes: Default::default(),
+                            };
+                            self.connect(&src_pin, &dst_pin, snarl);
+
                             ui.close_menu();
                         }
                     }
                 }
             },
-            AnyPins::In(src_pins) => {
-                for src_pin in src_pins {
-                    let src_in = snarl[src_pin.node].inputs()[src_pin.input];
+            AnyPins::In(src_pin_ids) => {
+                for src_pin_id in src_pin_ids {
+                    let src_in = snarl[src_pin_id.node].inputs()[src_pin_id.input];
                     let dst_out_candidates = Node::fabrics().into_iter().filter_map(|(name, factory, _, outputs)| {
                         outputs
                             .iter()
@@ -274,11 +305,15 @@ impl SnarlViewer<Node> for NodeViewer {
                         if ui.button(name).clicked() {
                             // Create new node.
                             let node = snarl.insert_node(pos, factory(&self.config));
-                            let dst_pin = OutPinId { node, output: idx };
 
                             // Connect the wire.
-                            // snarl.drop_inputs(*src_pin);
-                            snarl.connect(dst_pin, *src_pin);
+                            let dst_pin = OutPin {
+                                id: OutPinId { node, output: idx },
+                                remotes: Default::default(),
+                            };
+                            let src_pin = snarl.in_pin(*src_pin_id);
+                            self.connect(&dst_pin, &src_pin, snarl);
+
                             ui.close_menu();
                         }
                     }
@@ -294,8 +329,8 @@ impl SnarlViewer<Node> for NodeViewer {
     fn show_node_menu(
         &mut self,
         node_id: NodeId,
-        _inputs: &[InPin],
-        _outputs: &[OutPin],
+        inputs: &[InPin],
+        outputs: &[OutPin],
         ui: &mut Ui,
         snarl: &mut Snarl<Node>,
     ) {
@@ -304,7 +339,23 @@ impl SnarlViewer<Node> for NodeViewer {
             if self.render == Some(node_id) {
                 self.unregister_render(snarl);
             }
+
+            for in_pin in inputs {
+                for out_pin_id in &in_pin.remotes {
+                    let out_pin = snarl.out_pin(*out_pin_id);
+                    self.disconnect(&out_pin, &in_pin, snarl);
+                }
+            }
+
+            for out_pin in outputs {
+                for in_pin_id in &out_pin.remotes {
+                    let in_pin = snarl.in_pin(*in_pin_id);
+                    self.disconnect(out_pin, &in_pin, snarl);
+                }
+            }
+
             snarl.remove_node(node_id);
+
             ui.close_menu();
         }
     }
@@ -554,7 +605,7 @@ pub fn material_input_view(
     PinInfo::circle().with_fill(MATERIAL_COLOR)
 }
 
-pub fn empty_input_view(ui: &mut Ui, label: &str) -> PinInfo {
+pub fn empty_input_view(ui: &mut Ui, label: impl Into<WidgetText>) -> PinInfo {
     ui.label(label);
     PinInfo::circle().with_fill(UNTYPED_COLOR)
 }

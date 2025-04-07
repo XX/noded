@@ -1,4 +1,5 @@
 use eframe::egui_wgpu::RenderState;
+use egui_snarl::{InPin, OutPin};
 use serde::{Deserialize, Serialize};
 
 use self::raytracer::RaytracerRenderNode;
@@ -37,10 +38,17 @@ impl RenderNode {
         }
     }
 
-    pub fn disconnect_input(&mut self, input: usize) {
+    pub fn connect_input(&mut self, from: &OutPin, to: &InPin) {
         match self {
-            Self::Triangle(render) => render.disconnect_input(input),
-            Self::Raytracer(render) => render.disconnect_input(input),
+            Self::Triangle(render) => render.connect_input(from, to),
+            Self::Raytracer(render) => render.connect_input(from, to),
+        }
+    }
+
+    pub fn disconnect_input(&mut self, input_pin: &InPin) {
+        match self {
+            Self::Triangle(render) => render.disconnect_input(input_pin),
+            Self::Raytracer(render) => render.disconnect_input(input_pin),
         }
     }
 
