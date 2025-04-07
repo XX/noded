@@ -11,7 +11,7 @@ pub struct Texture {
 
 impl Texture {
     pub fn new_from_image(path: &str) -> Result<Self, TextureError> {
-        Self::new_from_scaled_image(path, 1_f32)
+        Self::new_from_scaled_image(path, 1.0)
     }
 
     pub fn new_from_scaled_image(path: &str, scale: f32) -> Result<Self, TextureError> {

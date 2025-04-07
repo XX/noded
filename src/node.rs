@@ -8,10 +8,11 @@ use serde::{Deserialize, Serialize};
 use self::camera::CameraNode;
 use self::collection::CollectionNode;
 use self::expression::ExpressionNode;
-use self::material::{DielectricNode, LambertianNode, MaterialNode, MetalNode};
+use self::material::{CheckerboardNode, DielectricNode, EmissiveNode, LambertianNode, MaterialNode, MetalNode};
 use self::primitive::{PrimitiveNode, SphereNode};
 use self::render::RenderNode;
 use self::render::triangle::TriangleRenderNode;
+use self::texture::TextureNode;
 use self::viewer::{NodeConfig, empty_input_view};
 use crate::types::{Color, Vector3};
 
@@ -21,6 +22,7 @@ pub mod expression;
 pub mod material;
 pub mod primitive;
 pub mod render;
+pub mod texture;
 pub mod viewer;
 
 bitflags! {
@@ -29,9 +31,13 @@ bitflags! {
         const MATERIAL_METAL = 0b00000001;
         const MATERIAL_DIELECTRIC = Self::MATERIAL_METAL.bits() << 1;
         const MATERIAL_LAMBERT = Self::MATERIAL_DIELECTRIC.bits() << 1;
-        const MATERIALS = Self::MATERIAL_METAL.bits() | Self::MATERIAL_DIELECTRIC.bits() | Self::MATERIAL_LAMBERT.bits();
+        const MATERIAL_EMISSIVE = Self::MATERIAL_LAMBERT.bits() << 1;
+        const MATERIAL_CHECKERBOARD = Self::MATERIAL_EMISSIVE.bits() << 1;
+        const MATERIALS = Self::MATERIAL_METAL.bits() | Self::MATERIAL_DIELECTRIC.bits() | Self::MATERIAL_LAMBERT.bits() | Self::MATERIAL_EMISSIVE.bits() | Self::MATERIAL_CHECKERBOARD.bits();
 
-        const PRIMITIVE_SPHERE = Self::MATERIAL_LAMBERT.bits() << 1;
+        const TEXTURE = Self::MATERIAL_CHECKERBOARD.bits() << 1;
+
+        const PRIMITIVE_SPHERE = Self::TEXTURE.bits() << 1;
         const PRIMITIVES = Self::PRIMITIVE_SPHERE.bits();
 
         const COLLECTION = Self::PRIMITIVE_SPHERE.bits() << 1;
@@ -59,6 +65,7 @@ bitflags! {
 #[derive(Clone, Serialize, Deserialize)]
 pub enum Node {
     Material(MaterialNode),
+    Texture(TextureNode),
     Primitive(PrimitiveNode),
     Collection(CollectionNode),
     Camera(CameraNode),
@@ -98,6 +105,30 @@ impl Node {
                 |_| Node::Material(MaterialNode::Dielectric(DielectricNode::default())),
                 DielectricNode::INPUTS.as_slice(),
                 DielectricNode::OUTPUTS.as_slice(),
+            ),
+            (
+                LambertianNode::NAME,
+                |_| Node::Material(MaterialNode::Lambertian(LambertianNode::default())),
+                LambertianNode::INPUTS.as_slice(),
+                LambertianNode::OUTPUTS.as_slice(),
+            ),
+            (
+                EmissiveNode::NAME,
+                |_| Node::Material(MaterialNode::Emissive(EmissiveNode::default())),
+                EmissiveNode::INPUTS.as_slice(),
+                EmissiveNode::OUTPUTS.as_slice(),
+            ),
+            (
+                CheckerboardNode::NAME,
+                |_| Node::Material(MaterialNode::Checkerboard(CheckerboardNode::default())),
+                CheckerboardNode::INPUTS.as_slice(),
+                CheckerboardNode::OUTPUTS.as_slice(),
+            ),
+            (
+                TextureNode::NAME,
+                |_| Node::Texture(TextureNode::default()),
+                TextureNode::INPUTS.as_slice(),
+                TextureNode::OUTPUTS.as_slice(),
             ),
             (
                 SphereNode::NAME,
@@ -172,6 +203,9 @@ impl Node {
             Self::Material(MaterialNode::Metal(_)) => MetalNode::NAME,
             Self::Material(MaterialNode::Dielectric(_)) => DielectricNode::NAME,
             Self::Material(MaterialNode::Lambertian(_)) => LambertianNode::NAME,
+            Self::Material(MaterialNode::Emissive(_)) => EmissiveNode::NAME,
+            Self::Material(MaterialNode::Checkerboard(_)) => CheckerboardNode::NAME,
+            Self::Texture(_) => TextureNode::NAME,
             Self::Primitive(PrimitiveNode::Sphere(_)) => SphereNode::NAME,
             Self::Collection(_) => CollectionNode::NAME,
             Self::Camera(_) => CameraNode::NAME,
@@ -189,6 +223,7 @@ impl Node {
     pub fn inputs(&self) -> &[u64] {
         match self {
             Self::Material(material) => material.inputs(),
+            Self::Texture(texture) => texture.inputs(),
             Self::Primitive(primitive) => primitive.inputs(),
             Self::Collection(collection) => collection.inputs(),
             Self::Camera(camera) => camera.inputs(),
@@ -205,6 +240,7 @@ impl Node {
     pub fn outputs(&self) -> &[u64] {
         match self {
             Self::Material(material) => material.outputs(),
+            Self::Texture(texture) => texture.outputs(),
             Self::Primitive(primitive) => primitive.outputs(),
             Self::Collection(collection) => collection.outputs(),
             Self::Camera(camera) => camera.outputs(),
@@ -221,6 +257,7 @@ impl Node {
     pub fn connect_input(&mut self, from: &OutPin, to: &InPin) {
         match self {
             Self::Material(material) => material.connect_input(from, to),
+            Self::Texture(texture) => texture.connect_input(from, to),
             Self::Primitive(primitive) => primitive.connect_input(from, to),
             Self::Collection(collection) => collection.connect_input(from, to),
             Self::Camera(camera) => camera.connect_input(from, to),
@@ -234,6 +271,7 @@ impl Node {
     pub fn disconnect_input(&mut self, input_pin: &InPin) {
         match self {
             Self::Material(material) => material.disconnect_input(input_pin),
+            Self::Texture(texture) => texture.disconnect_input(input_pin),
             Self::Primitive(primitive) => primitive.disconnect_input(input_pin),
             Self::Collection(collection) => collection.disconnect_input(input_pin),
             Self::Camera(camera) => camera.disconnect_input(input_pin),
@@ -270,6 +308,13 @@ impl Node {
         match self {
             Self::Material(material_node) => material_node,
             node => panic!("Node `{}` is not a `{}`", node.name(), MaterialNode::NAME),
+        }
+    }
+
+    fn as_texture_node_mut(&mut self) -> &mut TextureNode {
+        match self {
+            Self::Texture(texture_node) => texture_node,
+            node => panic!("Node `{}` is not a `{}`", node.name(), TextureNode::NAME),
         }
     }
 

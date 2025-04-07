@@ -5,9 +5,10 @@ use egui::{Color32, Ui, WidgetText};
 use egui_snarl::ui::{AnyPins, PinInfo, SnarlViewer, WireStyle};
 use egui_snarl::{InPin, InPinId, NodeId, OutPin, OutPinId, Snarl};
 
-use super::material::LambertianNode;
+use super::material::{CheckerboardNode, EmissiveNode, LambertianNode};
 use super::render::raytracer::RaytracerRenderNode;
 use super::render::triangle::TriangleRenderNode;
+use super::texture::TextureNode;
 use super::{
     CameraNode, DielectricNode, MaterialNode, MetalNode, Node, OutputNode, PrimitiveNode, RenderNode, SphereNode,
 };
@@ -175,6 +176,11 @@ impl SnarlViewer<Node> for NodeViewer {
             Node::Material(MaterialNode::Metal(_)) => MetalNode::show_input(pin, ui, snarl),
             Node::Material(MaterialNode::Dielectric(_)) => DielectricNode::show_input(pin, ui, snarl),
             Node::Material(MaterialNode::Lambertian(_)) => LambertianNode::show_input(pin, ui, snarl),
+            Node::Material(MaterialNode::Emissive(_)) => EmissiveNode::show_input(pin, ui, snarl),
+            Node::Material(MaterialNode::Checkerboard(_)) => CheckerboardNode::show_input(pin, ui, snarl),
+            Node::Texture(_) => {
+                unreachable!("{} node has no inputs", TextureNode::NAME)
+            },
             Node::Primitive(PrimitiveNode::Sphere(_)) => SphereNode::show_input(pin, ui, snarl),
             Node::Collection(ref collection) => collection.show_input(pin, ui, snarl),
             Node::Camera(_) => CameraNode::show_input(pin, ui, snarl),
@@ -201,6 +207,20 @@ impl SnarlViewer<Node> for NodeViewer {
     fn show_output(&mut self, pin: &OutPin, ui: &mut Ui, snarl: &mut Snarl<Node>) -> PinInfo {
         match &mut snarl[pin.id.node] {
             Node::Material(_) => PinInfo::circle().with_fill(MATERIAL_COLOR),
+            Node::Texture(texture) => {
+                let edit = egui::TextEdit::singleline(&mut texture.path)
+                    .clip_text(false)
+                    .desired_width(0.0)
+                    .margin(ui.spacing().item_spacing);
+                ui.horizontal(|ui| {
+                    ui.add(edit);
+                    ui.label("Path");
+                });
+
+                PinInfo::circle()
+                    .with_fill(STRING_COLOR)
+                    .with_wire_style(WireStyle::AxisAligned { corner_radius: 10.0 })
+            },
             Node::Output(_) => {
                 unreachable!("Output node has no outputs")
             },
@@ -223,7 +243,7 @@ impl SnarlViewer<Node> for NodeViewer {
             Node::Color(value) => {
                 assert_eq!(pin.id.output, 0, "Color node has only one output");
                 color_edit_button_srgba(ui, value, Alpha::BlendOrAdditive);
-                PinInfo::circle().with_fill(NUMBER_COLOR)
+                PinInfo::circle().with_fill(VECTOR_COLOR)
             },
             Node::Vector(vector) => {
                 assert_eq!(pin.id.output, 0, "Number node has only one output");
