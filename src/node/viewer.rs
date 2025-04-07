@@ -1,4 +1,5 @@
 use eframe::egui_wgpu::RenderState;
+use egui::emath::Numeric;
 use egui::epaint::Hsva;
 use egui::{Color32, Ui};
 use egui_snarl::ui::{AnyPins, PinInfo, SnarlViewer, WireStyle};
@@ -22,6 +23,7 @@ pub const UNTYPED_COLOR: Color32 = Color32::from_rgb(0xb0, 0xb0, 0xb0);
 
 pub struct NodeConfig {
     pub render_state: RenderState,
+    pub max_viewport_resolution: u32,
 }
 
 pub struct NodeViewer {
@@ -30,7 +32,7 @@ pub struct NodeViewer {
 }
 
 impl NodeViewer {
-    pub fn new(render_state: RenderState, snarl: &Snarl<Node>) -> Self {
+    pub fn new(render_state: RenderState, max_viewport_resolution: u32, snarl: &Snarl<Node>) -> Self {
         let mut render = None;
 
         for (from_pin, to_pin) in snarl.wires() {
@@ -44,23 +46,44 @@ impl NodeViewer {
 
         Self {
             render,
-            config: NodeConfig { render_state },
+            config: NodeConfig {
+                render_state,
+                max_viewport_resolution,
+            },
         }
     }
 
     pub fn draw(&mut self, viewport: &egui::Rect, painter: &egui::Painter, snarl: &mut Snarl<Node>) {
         if let Some(id) = self.render {
-            if let Some(RenderNode::Triangle(render)) = snarl.get_node(id).and_then(Node::render_ref) {
-                render.draw(*viewport, painter);
+            match snarl.get_node(id).and_then(Node::render_ref) {
+                Some(RenderNode::Triangle(render)) => {
+                    render.draw(*viewport, painter);
+                },
+                Some(RenderNode::Raytracer(render)) => {
+                    render.draw(*viewport, painter, snarl);
+                },
+                None => (),
             }
         }
     }
 
-    pub fn after_show(&mut self, _ui: &mut Ui, response: &egui::Response, snarl: &mut Snarl<Node>) {
+    pub fn after_show(&mut self, ui: &mut Ui, response: &egui::Response, snarl: &mut Snarl<Node>) {
         if let Some(id) = self.render {
-            if let RenderNode::Triangle(render) = snarl[id].as_render_mut() {
-                let drag = response.drag_delta().x;
-                render.recalc_angle(drag as _);
+            match snarl[id].as_render_mut() {
+                RenderNode::Triangle(render) => {
+                    let drag = response.drag_delta().x;
+                    render.recalc_angle(drag as _);
+                },
+                RenderNode::Raytracer(render) => {
+                    // let camera_id = render.camera_id();
+                    if let Some(camera) = render
+                        .camera_id()
+                        .and_then(|camera_id| snarl.get_node_mut(camera_id).and_then(Node::camera_mut))
+                    {
+                        ui.input(|i| camera.after_events(i));
+                    }
+                    // let drag = response. drag_delta().x;
+                },
             }
         }
     }
@@ -352,12 +375,15 @@ pub fn number_input_remote_value(pin: &InPin, snarl: &Snarl<Node>, label: &str) 
     }
 }
 
-pub fn number_input_view(
+pub fn number_input_view<N>(
     ui: &mut Ui,
     label: &str,
-    node_pin: &mut NodePin<f64>,
-    remote_value: Option<(&'static str, f64)>,
-) -> PinInfo {
+    node_pin: &mut NodePin<N>,
+    remote_value: Option<(&'static str, N)>,
+) -> PinInfo
+where
+    N: Numeric,
+{
     ui.horizontal(|ui| {
         ui.label(label);
         let enabled = match remote_value {
@@ -368,6 +394,30 @@ pub fn number_input_view(
             },
         };
         ui.add_enabled(enabled, egui::DragValue::new(node_pin.as_mut()));
+    });
+    PinInfo::circle().with_fill(NUMBER_COLOR)
+}
+
+pub fn as_number_input_view<N, M>(
+    ui: &mut Ui,
+    label: &str,
+    node_pin: &mut NodePin<N>,
+    remote_value: Option<(&'static str, M)>,
+) -> PinInfo
+where
+    N: AsMut<f64>,
+    M: Into<N>,
+{
+    ui.horizontal(|ui| {
+        ui.label(label);
+        let enabled = match remote_value {
+            None => true,
+            Some(remote) => {
+                node_pin.set(remote.1.into());
+                false
+            },
+        };
+        ui.add_enabled(enabled, egui::DragValue::new(node_pin.as_mut().as_mut()));
     });
     PinInfo::circle().with_fill(NUMBER_COLOR)
 }

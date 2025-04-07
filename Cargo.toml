@@ -12,7 +12,10 @@ egui-probe = { version = "0.8.0", features = ["derive"] }
 egui-scale = "0.1"
 egui-snarl = { git = "https://github.com/zakarumych/egui-snarl.git", features = ["serde", "egui-probe"] }
 egui_extras = { version = "0.31", features = ["all_loaders"] }
-nalgebra = { version = "0.33", features = ["serde-serialize"] }
+hw-skymodel = "0.1"
+image = "0.25"
+nalgebra = { version = "0.33", features = ["serde-serialize", "bytemuck"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1" }
 syn = { version = "2", features = ["extra-traits"] }
+thiserror = "2.0"

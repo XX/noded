@@ -82,7 +82,15 @@ impl NodedApp {
                 .unwrap_or_default()
         });
 
-        let viewer = NodeViewer::new(cx.wgpu_render_state.clone().expect("WGPU must be enabled"), &snarl);
+        let screen_rect = cx.egui_ctx.input(|i| i.screen_rect());
+        let max_viewport_resolution = (screen_rect.width() * screen_rect.height() / 10.0) as u32;
+        println!("Max resolution: {max_viewport_resolution}");
+
+        let viewer = NodeViewer::new(
+            cx.wgpu_render_state.clone().expect("WGPU must be enabled"),
+            max_viewport_resolution,
+            &snarl,
+        );
         Self {
             snarl,
             style,

@@ -1,8 +1,19 @@
-use serde::{Deserialize, Serialize};
+pub use self::angle::Angle;
+pub use self::pin::NodePin;
+pub use self::ray::Ray;
+
+pub mod angle;
+pub mod pin;
+pub mod ray;
 
 pub type Color = egui::Color32;
 pub type Vector3 = nalgebra::Vector3<f64>;
+pub type Vector3f32 = nalgebra::Vector3<f32>;
+pub type Vector4f32 = nalgebra::Vector4<f32>;
 pub type Point3 = Vector3;
+pub type Matrix3 = nalgebra::Matrix3<f64>;
+pub type Matrix4 = nalgebra::Matrix4<f64>;
+pub type Matrix4f32 = nalgebra::Matrix4<f32>;
 
 #[derive(Copy, Clone, Debug, Default, PartialEq)]
 pub struct Basis {
@@ -11,59 +22,6 @@ pub struct Basis {
     pub w: Vector3,
 }
 
-#[derive(Copy, Clone, Debug, Default, PartialEq)]
-pub struct Ray {
-    pub origin: Point3,
-    pub direction: Vector3,
-}
-
-impl Ray {
-    pub fn new(origin: Point3, direction: Vector3) -> Self {
-        Self {
-            origin,
-            direction: direction.normalize(),
-        }
-    }
-
-    pub fn at(&self, t: f64) -> Point3 {
-        self.origin + t * self.direction
-    }
-}
-
-#[derive(Copy, Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
-pub struct NodePin<T> {
-    initial: T,
-    value: Option<T>,
-}
-
-impl<T> NodePin<T> {
-    pub fn new(initial: T) -> Self {
-        Self { initial, value: None }
-    }
-
-    pub fn set(&mut self, value: T) {
-        self.value = Some(value);
-    }
-
-    pub fn set_initial(&mut self, initial: T) {
-        self.initial = initial;
-    }
-
-    pub fn reset(&mut self) {
-        self.value = None;
-    }
-
-    pub fn as_ref(&self) -> &T {
-        self.value.as_ref().unwrap_or(&self.initial)
-    }
-
-    pub fn as_mut(&mut self) -> &mut T {
-        self.value.as_mut().unwrap_or(&mut self.initial)
-    }
-}
-
-impl<T: Copy> NodePin<T> {
-    pub fn get(&self) -> T {
-        self.value.unwrap_or(self.initial)
-    }
+pub fn from_vector3_to_vector3f32(v: &Vector3) -> Vector3f32 {
+    Vector3f32::new(v.x as _, v.y as _, v.z as _)
 }

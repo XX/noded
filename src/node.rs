@@ -125,7 +125,11 @@ impl Node {
             ),
             (
                 RaytracerRenderNode::NAME,
-                |_| Node::Render(RenderNode::Raytracer(RaytracerRenderNode::default())),
+                |config| {
+                    Node::Render(RenderNode::Raytracer(RaytracerRenderNode::new(
+                        config.max_viewport_resolution,
+                    )))
+                },
                 RaytracerRenderNode::INPUTS.as_slice(),
                 RaytracerRenderNode::OUTPUTS.as_slice(),
             ),
@@ -260,6 +264,27 @@ impl Node {
         match self {
             Self::Primitive(primitive_node) => primitive_node,
             node => panic!("Node `{}` is not a `{}`", node.name(), PrimitiveNode::NAME),
+        }
+    }
+
+    fn camera_ref(&self) -> Option<&CameraNode> {
+        match self {
+            Self::Camera(camera_node) => Some(camera_node),
+            _ => None,
+        }
+    }
+
+    fn camera_mut(&mut self) -> Option<&mut CameraNode> {
+        match self {
+            Self::Camera(camera_node) => Some(camera_node),
+            _ => None,
+        }
+    }
+
+    fn as_camera(&self) -> &CameraNode {
+        match self {
+            Self::Camera(camera_node) => camera_node,
+            node => panic!("Node `{}` is not a `{}`", node.name(), CameraNode::NAME),
         }
     }
 
