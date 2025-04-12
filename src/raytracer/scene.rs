@@ -303,12 +303,6 @@ impl GroupData {
             label: Some("scene layout"),
         });
 
-        println!(
-            "Updating scene: {} {}",
-            scene.spheres.len(),
-            sphere_buffer.handle().size()
-        );
-
         Self {
             sphere_buffer,
             material_buffer,

@@ -174,7 +174,6 @@ impl SceneNode {
                     destination: &mut nodes,
                 }),
             );
-            println!("  Nodes: {}", nodes.len());
 
             for node_id in &nodes {
                 let has_subscription_response = Node::handle_msg(
