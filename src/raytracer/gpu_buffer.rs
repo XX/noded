@@ -60,6 +60,9 @@ pub struct StorageBuffer {
 
 impl StorageBuffer {
     pub fn new_from_bytes(device: &wgpu::Device, bytes: &[u8], binding_idx: u32, label: Option<&str>) -> Self {
+        const EMPTY: [u8; 32] = [0; 32];
+
+        let bytes = if bytes.is_empty() { &EMPTY } else { bytes };
         let handle = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             contents: bytes,
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,

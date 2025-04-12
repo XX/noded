@@ -3,9 +3,9 @@ use egui_snarl::ui::PinInfo;
 use egui_snarl::{InPin, NodeId, OutPin, Snarl};
 use serde::{Deserialize, Serialize};
 
+use super::message::{MessageHandling, SelfNodeMut};
 use crate::node::viewer::{
-    as_number_input_view, empty_input_view, number_input_remote_value, number_input_view, vector_input_remote_value,
-    vector_input_view,
+    as_number_input_view, number_input_remote_value, number_input_view, vector_input_remote_value, vector_input_view,
 };
 use crate::node::{Node, NodeFlags};
 use crate::types::{Angle, Matrix3, NodePin, Point3, Vector3};
@@ -21,7 +21,6 @@ pub struct CameraNode {
     pub aperture: NodePin<f64>,
     /// Focus distance must be a positive number.
     pub focus_distance: NodePin<f64>,
-    pub scene: NodePin<Vec<NodeId>>,
 
     previous_mouse_pos: Option<Pos2>,
 }
@@ -39,7 +38,6 @@ impl Default for CameraNode {
             vfov: NodePin::new(Angle::degrees(30.0)),
             aperture: NodePin::new(0.8),
             focus_distance: NodePin::new(focus_distance),
-            scene: NodePin::default(),
 
             previous_mouse_pos: None,
         }
@@ -48,14 +46,13 @@ impl Default for CameraNode {
 
 impl CameraNode {
     pub const NAME: &str = "Camera";
-    pub const INPUTS: [u64; 7] = [
+    pub const INPUTS: [u64; 6] = [
         NodeFlags::TYPICAL_VECTOR_INPUT.bits(),
         NodeFlags::TYPICAL_NUMBER_INPUT.bits(),
         NodeFlags::TYPICAL_NUMBER_INPUT.bits(),
         NodeFlags::TYPICAL_NUMBER_INPUT.bits(),
         NodeFlags::TYPICAL_NUMBER_INPUT.bits(),
         NodeFlags::TYPICAL_NUMBER_INPUT.bits(),
-        NodeFlags::PRIMITIVES.bits() | NodeFlags::COLLECTION.bits(),
     ];
     pub const OUTPUTS: [u64; 1] = [NodeFlags::CAMERA.bits()];
 
@@ -66,88 +63,66 @@ impl CameraNode {
     pub fn outputs(&self) -> &[u64] {
         &Self::OUTPUTS
     }
+}
 
-    pub fn show_input(pin: &InPin, ui: &mut Ui, snarl: &mut Snarl<Node>) -> PinInfo {
-        match pin.id.input {
+impl MessageHandling for CameraNode {
+    fn handle_input_show(mut self_node: SelfNodeMut, pin: &InPin, ui: &mut Ui) -> Option<PinInfo> {
+        Some(match pin.id.input {
             0 => {
                 const LABEL: &str = "Position";
 
-                let remote_value = vector_input_remote_value(pin, snarl, LABEL);
-                let node = snarl[pin.id.node].as_camera_node_mut();
+                let remote_value = vector_input_remote_value(pin, self_node.snarl, LABEL);
+                let node = self_node.as_camera_node_mut();
                 vector_input_view(ui, LABEL, &mut node.position, remote_value)
             },
             1 => {
                 const LABEL: &str = "Yaw";
 
-                let remote_value = number_input_remote_value(pin, snarl, LABEL);
-                let node = snarl[pin.id.node].as_camera_node_mut();
+                let remote_value = number_input_remote_value(pin, self_node.snarl, LABEL);
+                let node = self_node.as_camera_node_mut();
                 as_number_input_view(ui, LABEL, &mut node.yaw, remote_value)
             },
             2 => {
                 const LABEL: &str = "Pitch";
 
-                let remote_value = number_input_remote_value(pin, snarl, LABEL);
-                let node = snarl[pin.id.node].as_camera_node_mut();
+                let remote_value = number_input_remote_value(pin, self_node.snarl, LABEL);
+                let node = self_node.as_camera_node_mut();
                 as_number_input_view(ui, LABEL, &mut node.pitch, remote_value)
             },
             3 => {
                 const LABEL: &str = "VFOV";
 
-                let remote_value = number_input_remote_value(pin, snarl, LABEL);
-                let node = snarl[pin.id.node].as_camera_node_mut();
+                let remote_value = number_input_remote_value(pin, self_node.snarl, LABEL);
+                let node = self_node.as_camera_node_mut();
                 as_number_input_view(ui, LABEL, &mut node.vfov, remote_value)
             },
             4 => {
                 const LABEL: &str = "Aperture";
 
-                let remote_value = number_input_remote_value(pin, snarl, LABEL);
-                let node = snarl[pin.id.node].as_camera_node_mut();
+                let remote_value = number_input_remote_value(pin, self_node.snarl, LABEL);
+                let node = self_node.as_camera_node_mut();
                 number_input_view(ui, LABEL, &mut node.aperture, remote_value)
             },
             5 => {
                 const LABEL: &str = "Focus Distance";
 
-                let remote_value = number_input_remote_value(pin, snarl, LABEL);
-                let node = snarl[pin.id.node].as_camera_node_mut();
+                let remote_value = number_input_remote_value(pin, self_node.snarl, LABEL);
+                let node = self_node.as_camera_node_mut();
                 number_input_view(ui, LABEL, &mut node.focus_distance, remote_value)
             },
-            6 => {
-                const LABEL: &str = "Scene";
-
-                let remote_value = match &*pin.remotes {
-                    [] => None,
-                    [remote] => Some(match &snarl[remote.node] {
-                        Node::Primitive(_) => vec![remote.node],
-                        Node::Collection(collection) => collection.cloned_nodes(),
-                        node => unreachable!("{LABEL} input not suppor connection with `{}`", node.name()),
-                    }),
-                    _ => None,
-                };
-
-                if let Some(value) = remote_value {
-                    let Node::Camera(node) = &mut snarl[pin.id.node] else {
-                        panic!()
-                    };
-                    node.scene.set(value);
-                }
-
-                empty_input_view(ui, LABEL)
-            },
             _ => unreachable!(),
-        }
+        })
     }
 
-    pub fn connect_input(&mut self, _from: &OutPin, _to: &InPin) {}
-
-    pub fn disconnect_input(&mut self, input_pin: &InPin) {
-        match input_pin.id.input {
-            0 => self.position.reset(),
-            1 => self.yaw.reset(),
-            2 => self.pitch.reset(),
-            3 => self.vfov.reset(),
-            4 => self.aperture.reset(),
-            5 => self.focus_distance.reset(),
-            6 => self.scene.reset(),
+    fn handle_input_disconnect(mut self_node: SelfNodeMut, _from: &OutPin, to: &InPin) {
+        let node = self_node.as_camera_node_mut();
+        match to.id.input {
+            0 => node.position.reset(),
+            1 => node.yaw.reset(),
+            2 => node.pitch.reset(),
+            3 => node.vfov.reset(),
+            4 => node.aperture.reset(),
+            5 => node.focus_distance.reset(),
             _ => unreachable!(),
         }
     }

@@ -2,10 +2,11 @@ use std::collections::HashMap;
 
 use egui::{Color32, Ui};
 use egui_snarl::ui::{PinInfo, WireStyle};
-use egui_snarl::{InPin, InPinId, OutPin, Snarl};
+use egui_snarl::{InPin, InPinId};
 
+use super::NodeFlags;
+use super::message::{MessageHandling, SelfNodeMut};
 use super::viewer::{NUMBER_COLOR, STRING_COLOR, format_float};
-use super::{Node, NodeFlags};
 
 /// Node for evaluating algebraic expression
 /// It has number of inputs equal to number of variables in the expression.
@@ -42,13 +43,15 @@ impl ExpressionNode {
     pub fn outputs(&self) -> &[u64] {
         &Self::OUTPUTS
     }
+}
 
-    pub fn show_input(pin: &InPin, ui: &mut Ui, snarl: &mut Snarl<Node>) -> PinInfo {
-        match pin.id.input {
+impl MessageHandling for ExpressionNode {
+    fn handle_input_show(self_node: SelfNodeMut, pin: &InPin, ui: &mut Ui) -> Option<PinInfo> {
+        Some(match pin.id.input {
             0 => {
                 let changed = match &*pin.remotes {
                     [] => {
-                        let input = snarl[pin.id.node].string_in();
+                        let input = self_node.snarl[pin.id.node].string_in();
                         let response = egui::TextEdit::singleline(input)
                             .clip_text(false)
                             .desired_width(0.0)
@@ -59,7 +62,7 @@ impl ExpressionNode {
                         response.changed()
                     },
                     [remote] => {
-                        let new_string = snarl[remote.node].string_out().to_owned();
+                        let new_string = self_node.snarl[remote.node].string_out().to_owned();
 
                         egui::TextEdit::singleline(&mut &*new_string)
                             .clip_text(false)
@@ -67,7 +70,7 @@ impl ExpressionNode {
                             .margin(ui.spacing().item_spacing)
                             .show(ui);
 
-                        let input = snarl[pin.id.node].string_in();
+                        let input = self_node.snarl[pin.id.node].string_in();
                         if new_string == *input {
                             false
                         } else {
@@ -79,7 +82,7 @@ impl ExpressionNode {
                 };
 
                 if changed {
-                    let node = snarl[pin.id.node].as_expression_node_mut();
+                    let node = self_node.snarl[pin.id.node].as_expression_node_mut();
 
                     if let Ok(expr) = syn::parse_str(&node.text) {
                         node.expr = expr;
@@ -102,7 +105,7 @@ impl ExpressionNode {
 
                         let old_inputs = (0..old_bindings.len())
                             .map(|idx| {
-                                snarl.in_pin(InPinId {
+                                self_node.snarl.in_pin(InPinId {
                                     node: pin.id.node,
                                     input: idx + 1,
                                 })
@@ -114,7 +117,7 @@ impl ExpressionNode {
 
                             match new_idx {
                                 None => {
-                                    snarl.drop_inputs(old_inputs[idx].id);
+                                    self_node.snarl.drop_inputs(old_inputs[idx].id);
                                 },
                                 Some(new_idx) if new_idx != idx => {
                                     let new_in_pin = InPinId {
@@ -122,8 +125,8 @@ impl ExpressionNode {
                                         input: new_idx,
                                     };
                                     for &remote in &old_inputs[idx].remotes {
-                                        snarl.disconnect(remote, old_inputs[idx].id);
-                                        snarl.connect(remote, new_in_pin);
+                                        self_node.snarl.disconnect(remote, old_inputs[idx].id);
+                                        self_node.snarl.connect(remote, new_in_pin);
                                     }
                                 },
                                 _ => {},
@@ -136,17 +139,17 @@ impl ExpressionNode {
                     .with_wire_style(WireStyle::AxisAligned { corner_radius: 10.0 })
             },
             idx => {
-                if idx <= snarl[pin.id.node].as_expression_node_mut().bindings.len() {
+                if idx <= self_node.snarl[pin.id.node].as_expression_node_mut().bindings.len() {
                     match &*pin.remotes {
                         [] => {
-                            let node = snarl[pin.id.node].as_expression_node_mut();
+                            let node = self_node.snarl[pin.id.node].as_expression_node_mut();
                             ui.label(&node.bindings[idx - 1]);
                             ui.add(egui::DragValue::new(&mut node.values[idx - 1]));
                             PinInfo::circle().with_fill(NUMBER_COLOR)
                         },
                         [remote] => {
-                            let new_value = snarl[remote.node].number_out();
-                            let node = snarl[pin.id.node].as_expression_node_mut();
+                            let new_value = self_node.snarl[remote.node].number_out();
+                            let node = self_node.snarl[pin.id.node].as_expression_node_mut();
                             ui.label(&node.bindings[idx - 1]);
                             ui.label(format_float(new_value));
                             node.values[idx - 1] = new_value;
@@ -159,12 +162,8 @@ impl ExpressionNode {
                     PinInfo::circle().with_fill(Color32::BLACK)
                 }
             },
-        }
+        })
     }
-
-    pub fn connect_input(&mut self, _from: &OutPin, _to: &InPin) {}
-
-    pub fn disconnect_input(&mut self, _input_pin: &InPin) {}
 }
 
 #[derive(Clone, Copy, serde::Serialize, serde::Deserialize)]

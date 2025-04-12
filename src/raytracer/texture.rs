@@ -1,9 +1,10 @@
 use image::RgbaImage;
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::types::Vector3f32;
 
-#[derive(Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Texture {
     dimensions: (u32, u32),
     data: Vec<[f32; 3]>,

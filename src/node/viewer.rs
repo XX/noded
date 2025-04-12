@@ -5,13 +5,11 @@ use egui::{Color32, Ui, WidgetText};
 use egui_snarl::ui::{AnyPins, PinInfo, SnarlViewer, WireStyle};
 use egui_snarl::{InPin, InPinId, NodeId, OutPin, OutPinId, Snarl};
 
-use super::material::{CheckerboardNode, EmissiveNode, LambertianNode};
+use super::material::InputMaterial;
+use super::message::{CommonNodeResponse, InputMessage, InputResponse, SelfNodeMut};
 use super::render::raytracer::RaytracerRenderNode;
-use super::render::triangle::TriangleRenderNode;
 use super::texture::TextureNode;
-use super::{
-    CameraNode, DielectricNode, MaterialNode, MetalNode, Node, OutputNode, PrimitiveNode, RenderNode, SphereNode,
-};
+use super::{Node, RenderNode};
 use crate::node::expression::ExpressionNode;
 use crate::types::{Color, NodePin, Vector3};
 use crate::widget::color_picker::{Alpha, color_button, color_edit_button_srgba};
@@ -60,8 +58,8 @@ impl NodeViewer {
                 Some(RenderNode::Triangle(render)) => {
                     render.draw(*viewport, painter);
                 },
-                Some(RenderNode::Raytracer(render)) => {
-                    render.draw(*viewport, painter, snarl);
+                Some(RenderNode::Raytracer(_render)) => {
+                    RaytracerRenderNode::draw(SelfNodeMut::new(id, snarl), *viewport, painter);
                 },
                 None => (),
             }
@@ -76,14 +74,12 @@ impl NodeViewer {
                     render.recalc_angle(drag as _);
                 },
                 RenderNode::Raytracer(render) => {
-                    // let camera_id = render.camera_id();
                     if let Some(camera) = render
                         .camera_id()
                         .and_then(|camera_id| snarl.get_node_mut(camera_id).and_then(Node::camera_node_mut))
                     {
                         ui.input(|i| camera.after_events(i));
                     }
-                    // let drag = response. drag_delta().x;
                 },
             }
         }
@@ -109,7 +105,7 @@ impl SnarlViewer<Node> for NodeViewer {
             }
 
             snarl.connect(from.id, to.id);
-            snarl[to.id.node].connect_input(from, to);
+            Node::send_msg(to.id.node, snarl, InputMessage::Connect { from, to });
             // snarl[from.id.node].connect_output(from, to);
 
             if snarl[to.id.node].output_node_ref().is_some() {
@@ -123,7 +119,7 @@ impl SnarlViewer<Node> for NodeViewer {
 
     #[inline]
     fn disconnect(&mut self, from: &OutPin, to: &InPin, snarl: &mut Snarl<Node>) {
-        snarl[to.id.node].disconnect_input(to);
+        Node::send_msg(to.id.node, snarl, InputMessage::Disconnect { from, to });
         snarl.disconnect(from.id, to.id);
 
         if self.render == Some(from.id.node) {
@@ -154,7 +150,7 @@ impl SnarlViewer<Node> for NodeViewer {
     fn drop_inputs(&mut self, pin: &InPin, snarl: &mut Snarl<Node>) {
         println!("Dropping input");
         // FIXME: where is this called?
-        snarl[pin.id.node].disconnect_input(pin);
+        // snarl[pin.id.node].disconnect_input(pin);
         snarl.drop_inputs(pin.id);
     }
 
@@ -172,34 +168,10 @@ impl SnarlViewer<Node> for NodeViewer {
 
     #[allow(refining_impl_trait)]
     fn show_input(&mut self, pin: &InPin, ui: &mut Ui, snarl: &mut Snarl<Node>) -> PinInfo {
-        match snarl[pin.id.node] {
-            Node::Material(MaterialNode::Metal(_)) => MetalNode::show_input(pin, ui, snarl),
-            Node::Material(MaterialNode::Dielectric(_)) => DielectricNode::show_input(pin, ui, snarl),
-            Node::Material(MaterialNode::Lambertian(_)) => LambertianNode::show_input(pin, ui, snarl),
-            Node::Material(MaterialNode::Emissive(_)) => EmissiveNode::show_input(pin, ui, snarl),
-            Node::Material(MaterialNode::Checkerboard(_)) => CheckerboardNode::show_input(pin, ui, snarl),
-            Node::Texture(_) => {
-                unreachable!("{} node has no inputs", TextureNode::NAME)
-            },
-            Node::Primitive(PrimitiveNode::Sphere(_)) => SphereNode::show_input(pin, ui, snarl),
-            Node::Collection(ref collection) => collection.show_input(pin, ui, snarl),
-            Node::Camera(_) => CameraNode::show_input(pin, ui, snarl),
-            Node::Render(RenderNode::Triangle(_)) => TriangleRenderNode::show_input(pin, ui, snarl),
-            Node::Render(RenderNode::Raytracer(_)) => RaytracerRenderNode::show_input(pin, ui, snarl),
-            Node::Output(_) => OutputNode::show_input(pin, ui, snarl),
-            Node::Number(_) => {
-                unreachable!("{} node has no inputs", Node::NUMBER_NAME)
-            },
-            Node::String(_) => {
-                unreachable!("{} node has no inputs", Node::STRING_NAME)
-            },
-            Node::Color(_) => {
-                unreachable!("{} node has no inputs", Node::COLOR_NAME)
-            },
-            Node::Vector(_) => {
-                unreachable!("{} node has no inputs", Node::VECTOR_NAME)
-            },
-            Node::Expression(_) => ExpressionNode::show_input(pin, ui, snarl),
+        let response = Node::send_msg(pin.id.node, snarl, InputMessage::Show { pin, ui });
+        match response {
+            Some(CommonNodeResponse::Input(InputResponse::Info(pin_info))) => pin_info,
+            _ => unreachable!("{} node has no inputs", snarl[pin.id.node].name()),
         }
     }
 
@@ -207,20 +179,7 @@ impl SnarlViewer<Node> for NodeViewer {
     fn show_output(&mut self, pin: &OutPin, ui: &mut Ui, snarl: &mut Snarl<Node>) -> PinInfo {
         match &mut snarl[pin.id.node] {
             Node::Material(_) => PinInfo::circle().with_fill(MATERIAL_COLOR),
-            Node::Texture(texture) => {
-                let edit = egui::TextEdit::singleline(&mut texture.path)
-                    .clip_text(false)
-                    .desired_width(0.0)
-                    .margin(ui.spacing().item_spacing);
-                ui.horizontal(|ui| {
-                    ui.add(edit);
-                    ui.label("Path");
-                });
-
-                PinInfo::circle()
-                    .with_fill(STRING_COLOR)
-                    .with_wire_style(WireStyle::AxisAligned { corner_radius: 10.0 })
-            },
+            Node::Texture(_) => TextureNode::show_output(SelfNodeMut::new(pin.id.node, snarl), pin, ui),
             Node::Output(_) => {
                 unreachable!("Output node has no outputs")
             },
@@ -499,10 +458,13 @@ pub fn vector_input_remote_value(pin: &InPin, snarl: &Snarl<Node>, label: &str) 
         [remote] => Some(match &snarl[remote.node] {
             Node::Number(value) => (Node::NUMBER_NAME, Vector3::new(*value, *value, *value)),
             Node::Vector(vector) => (Node::VECTOR_NAME, *vector),
-            Node::Color(color) => (
-                Node::COLOR_NAME,
-                Vector3::new(color[0] as _, color[1] as _, color[2] as _),
-            ),
+            Node::Color(color) => {
+                let color = color.to_normalized_gamma_f32();
+                (
+                    Node::COLOR_NAME,
+                    Vector3::new(color[0] as _, color[1] as _, color[2] as _),
+                )
+            },
             Node::Expression(expr) => {
                 let value = expr.eval();
                 (ExpressionNode::NAME, Vector3::new(value, value, value))
@@ -595,11 +557,11 @@ pub fn material_input_remote_value(
     pin: &InPin,
     snarl: &Snarl<Node>,
     label: &str,
-) -> Option<(&'static str, MaterialNode)> {
+) -> Option<(&'static str, InputMaterial)> {
     match &*pin.remotes {
         [] => None,
         [remote] => Some(match &snarl[remote.node] {
-            Node::Material(material) => (material.name(), material.clone()),
+            Node::Material(material) => (material.name(), InputMaterial::External(remote.node)),
             node => unreachable!("{label} input not suppor connection with `{}`", node.name()),
         }),
         _ => None,
@@ -609,16 +571,15 @@ pub fn material_input_remote_value(
 pub fn material_input_view(
     ui: &mut Ui,
     label: &str,
-    node_pin: &mut NodePin<MaterialNode>,
-    remote_value: Option<(&'static str, MaterialNode)>,
+    node_pin: &mut NodePin<InputMaterial>,
+    remote_value: Option<(&'static str, InputMaterial)>,
 ) -> PinInfo {
     ui.horizontal(|ui| {
         ui.label(label);
         match remote_value {
-            None => {}, //material_select(ui, node_pin.as_mut()),
+            None => {},
             Some(remote) => {
                 node_pin.set(remote.1);
-                //material_select(ui, node_pin.as_mut());
             },
         }
     });

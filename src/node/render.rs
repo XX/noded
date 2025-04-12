@@ -1,9 +1,9 @@
 use eframe::egui_wgpu::RenderState;
-use egui_snarl::{InPin, OutPin};
 use serde::{Deserialize, Serialize};
 
 use self::raytracer::RaytracerRenderNode;
 use self::triangle::TriangleRenderNode;
+use super::message::{CommonNodeMessage, CommonNodeResponse, MessageHandling, SelfNodeMut};
 
 pub mod raytracer;
 pub mod triangle;
@@ -38,17 +38,10 @@ impl RenderNode {
         }
     }
 
-    pub fn connect_input(&mut self, from: &OutPin, to: &InPin) {
-        match self {
-            Self::Triangle(render) => render.connect_input(from, to),
-            Self::Raytracer(render) => render.connect_input(from, to),
-        }
-    }
-
-    pub fn disconnect_input(&mut self, input_pin: &InPin) {
-        match self {
-            Self::Triangle(render) => render.disconnect_input(input_pin),
-            Self::Raytracer(render) => render.disconnect_input(input_pin),
+    pub fn handle_msg(self_node: SelfNodeMut, msg: CommonNodeMessage) -> Option<CommonNodeResponse> {
+        match self_node.as_render_node_ref() {
+            Self::Triangle(_) => TriangleRenderNode::handle_msg(self_node, msg),
+            Self::Raytracer(_) => RaytracerRenderNode::handle_msg(self_node, msg),
         }
     }
 
@@ -56,6 +49,13 @@ impl RenderNode {
         match self {
             Self::Triangle(render) => render,
             node => panic!("Node `{}` is not a `{}`", node.name(), TriangleRenderNode::NAME),
+        }
+    }
+
+    pub fn as_raytracer_render_ref(&self) -> &RaytracerRenderNode {
+        match self {
+            Self::Raytracer(render) => render,
+            node => panic!("Node `{}` is not a `{}`", node.name(), RaytracerRenderNode::NAME),
         }
     }
 

@@ -1,15 +1,20 @@
 use egui::Ui;
 use egui_snarl::ui::PinInfo;
-use egui_snarl::{InPin, NodeId, OutPin, Snarl};
+use egui_snarl::{InPin, NodeId, OutPin};
 use serde::{Deserialize, Serialize};
 
+use super::message::{EventMessage, EventResponse, MessageHandling, SelfNodeMut};
+use super::subscribtion::{Event, Subscription};
 use super::viewer::empty_input_view;
-use super::{Node, NodeFlags};
+use super::{Node, NodeFlags, collect_for_node};
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct CollectionNode {
     nodes: Vec<NodeId>,
     inputs: Vec<u64>,
+
+    #[serde(skip)]
+    subscription: Subscription,
 }
 
 impl Default for CollectionNode {
@@ -17,6 +22,7 @@ impl Default for CollectionNode {
         Self {
             nodes: Vec::new(),
             inputs: vec![NodeFlags::ALL.bits()],
+            subscription: Subscription::default(),
         }
     }
 }
@@ -36,11 +42,7 @@ impl CollectionNode {
         self.inputs.remove(idx);
     }
 
-    pub fn nodes(&self) -> &[NodeId] {
-        &self.nodes
-    }
-
-    pub fn cloned_nodes(&self) -> Vec<NodeId> {
+    pub fn to_node_ids(&self) -> Vec<NodeId> {
         self.nodes.clone()
     }
 
@@ -51,24 +53,50 @@ impl CollectionNode {
     pub fn outputs(&self) -> &[u64] {
         &Self::OUTPUTS
     }
+}
 
-    pub fn show_input(&self, pin: &InPin, ui: &mut Ui, snarl: &Snarl<Node>) -> PinInfo {
+impl MessageHandling for CollectionNode {
+    fn handle_input_show(self_node: SelfNodeMut, pin: &InPin, ui: &mut Ui) -> Option<PinInfo> {
         let name = pin
             .remotes
             .first()
-            .map(|out_pin| snarl[out_pin.node].name())
+            .map(|out_pin| self_node.snarl[out_pin.node].name())
             .unwrap_or_default();
 
-        empty_input_view(ui, format!("{} {name}", pin.id.input + 1))
+        Some(empty_input_view(ui, format!("{} {name}", pin.id.input + 1)))
     }
 
-    pub fn connect_input(&mut self, from: &OutPin, to: &InPin) {
-        self.insert(to.id.input, from.id.node);
+    fn handle_input_connect(mut self_node: SelfNodeMut, from: &OutPin, to: &InPin) {
+        let node = self_node.as_collection_node_mut();
+        node.insert(to.id.input, from.id.node);
+
+        if let Some(caller) = node.subscription.event_caller(Event::OnChange) {
+            caller(self_node)
+        }
     }
 
-    pub fn disconnect_input(&mut self, input_pin: &InPin) {
-        let input = input_pin.id.input;
+    fn handle_input_disconnect(mut self_node: SelfNodeMut, _from: &OutPin, to: &InPin) {
+        let node = self_node.as_collection_node_mut();
+        node.remove(to.id.input);
 
-        self.remove(input);
+        if let Some(caller) = node.subscription.event_caller(Event::OnChange) {
+            caller(self_node)
+        }
+    }
+
+    fn handle_input_collect_ids(
+        self_node: SelfNodeMut,
+        predicate: &dyn Fn(&Node) -> bool,
+        destination: &mut eframe::wgpu::naga::FastIndexSet<NodeId>,
+    ) {
+        let nodes = self_node.as_collection_node_ref().to_node_ids();
+        for node_id in nodes {
+            collect_for_node(Some(node_id), predicate, destination, self_node.snarl)
+        }
+    }
+
+    fn handle_event(mut self_node: SelfNodeMut, event_msg: EventMessage) -> Option<EventResponse> {
+        let node = self_node.as_collection_node_mut();
+        node.subscription.handle_event(event_msg)
     }
 }

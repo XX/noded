@@ -1,17 +1,20 @@
 use bitflags::bitflags;
+use eframe::wgpu::naga::FastIndexSet;
 use egui::Ui;
 use egui_snarl::ui::PinInfo;
-use egui_snarl::{InPin, OutPin, Snarl};
-use render::raytracer::RaytracerRenderNode;
+use egui_snarl::{InPin, NodeId, Snarl};
 use serde::{Deserialize, Serialize};
 
 use self::camera::CameraNode;
 use self::collection::CollectionNode;
 use self::expression::ExpressionNode;
 use self::material::{CheckerboardNode, DielectricNode, EmissiveNode, LambertianNode, MaterialNode, MetalNode};
+use self::message::{CommonNodeMessage, CommonNodeResponse, InputMessage, MessageHandling, SelfNodeMut};
 use self::primitive::{PrimitiveNode, SphereNode};
 use self::render::RenderNode;
+use self::render::raytracer::RaytracerRenderNode;
 use self::render::triangle::TriangleRenderNode;
+use self::scene::SceneNode;
 use self::texture::TextureNode;
 use self::viewer::{NodeConfig, empty_input_view};
 use crate::types::{Color, Vector3};
@@ -20,8 +23,11 @@ pub mod camera;
 pub mod collection;
 pub mod expression;
 pub mod material;
+pub mod message;
 pub mod primitive;
 pub mod render;
+pub mod scene;
+pub mod subscribtion;
 pub mod texture;
 pub mod viewer;
 
@@ -43,7 +49,9 @@ bitflags! {
         const COLLECTION = Self::PRIMITIVE_SPHERE.bits() << 1;
         const CAMERA = Self::COLLECTION.bits() << 1;
 
-        const RENDER_TRIANGLE = Self::CAMERA.bits() << 1;
+        const SCENE = Self::CAMERA.bits() << 1;
+
+        const RENDER_TRIANGLE = Self::SCENE.bits() << 1;
         const RENDER_RAYTRACER = Self::RENDER_TRIANGLE.bits() << 1;
         const RENDERS = Self::RENDER_TRIANGLE.bits() | Self::RENDER_RAYTRACER.bits();
 
@@ -69,6 +77,7 @@ pub enum Node {
     Primitive(PrimitiveNode),
     Collection(CollectionNode),
     Camera(CameraNode),
+    Scene(SceneNode),
     Render(RenderNode),
     Output(OutputNode),
     Number(f64),
@@ -149,6 +158,12 @@ impl Node {
                 CameraNode::OUTPUTS.as_slice(),
             ),
             (
+                SceneNode::NAME,
+                |_| Node::Scene(SceneNode::default()),
+                SceneNode::INPUTS.as_slice(),
+                SceneNode::OUTPUTS.as_slice(),
+            ),
+            (
                 TriangleRenderNode::NAME,
                 |_| Node::Render(RenderNode::Triangle(TriangleRenderNode::default())),
                 TriangleRenderNode::INPUTS.as_slice(),
@@ -209,6 +224,7 @@ impl Node {
             Self::Primitive(PrimitiveNode::Sphere(_)) => SphereNode::NAME,
             Self::Collection(_) => CollectionNode::NAME,
             Self::Camera(_) => CameraNode::NAME,
+            Self::Scene(_) => SceneNode::NAME,
             Self::Render(RenderNode::Triangle(_)) => TriangleRenderNode::NAME,
             Self::Render(RenderNode::Raytracer(_)) => RaytracerRenderNode::NAME,
             Self::Output(_) => OutputNode::NAME,
@@ -227,6 +243,7 @@ impl Node {
             Self::Primitive(primitive) => primitive.inputs(),
             Self::Collection(collection) => collection.inputs(),
             Self::Camera(camera) => camera.inputs(),
+            Self::Scene(scene) => scene.inputs(),
             Self::Render(render) => render.inputs(),
             Self::Output(output) => output.inputs(),
             Self::Number(_) => &[],
@@ -244,6 +261,7 @@ impl Node {
             Self::Primitive(primitive) => primitive.outputs(),
             Self::Collection(collection) => collection.outputs(),
             Self::Camera(camera) => camera.outputs(),
+            Self::Scene(scene) => scene.outputs(),
             Self::Render(render) => render.outputs(),
             Self::Output(output) => output.outputs(),
             Self::Number(_) => &Self::NUMBER_OUTPUTS,
@@ -254,31 +272,29 @@ impl Node {
         }
     }
 
-    pub fn connect_input(&mut self, from: &OutPin, to: &InPin) {
-        match self {
-            Self::Material(material) => material.connect_input(from, to),
-            Self::Texture(texture) => texture.connect_input(from, to),
-            Self::Primitive(primitive) => primitive.connect_input(from, to),
-            Self::Collection(collection) => collection.connect_input(from, to),
-            Self::Camera(camera) => camera.connect_input(from, to),
-            Self::Render(render) => render.connect_input(from, to),
-            Self::Output(output) => output.connect_input(from, to),
-            Self::Expression(expression) => expression.connect_input(from, to),
-            node => unreachable!("{} node has no inputs", node.name()),
-        }
+    pub fn send_msg<'a>(
+        self_id: NodeId,
+        snarl: &mut Snarl<Node>,
+        msg: impl Into<CommonNodeMessage<'a>>,
+    ) -> Option<CommonNodeResponse> {
+        let self_node = SelfNodeMut::new(self_id, snarl);
+        Self::handle_msg(self_node, msg)
     }
 
-    pub fn disconnect_input(&mut self, input_pin: &InPin) {
-        match self {
-            Self::Material(material) => material.disconnect_input(input_pin),
-            Self::Texture(texture) => texture.disconnect_input(input_pin),
-            Self::Primitive(primitive) => primitive.disconnect_input(input_pin),
-            Self::Collection(collection) => collection.disconnect_input(input_pin),
-            Self::Camera(camera) => camera.disconnect_input(input_pin),
-            Self::Render(render) => render.disconnect_input(input_pin),
-            Self::Output(output) => output.disconnect_input(input_pin),
-            Self::Expression(expression) => expression.disconnect_input(input_pin),
-            node => unreachable!("{} node has no inputs", node.name()),
+    pub fn handle_msg<'a>(self_node: SelfNodeMut, msg: impl Into<CommonNodeMessage<'a>>) -> Option<CommonNodeResponse> {
+        let msg = msg.into();
+
+        match self_node.node_ref() {
+            Self::Material(_) => MaterialNode::handle_msg(self_node, msg),
+            Self::Texture(_) => TextureNode::handle_msg(self_node, msg),
+            Self::Primitive(_) => PrimitiveNode::handle_msg(self_node, msg),
+            Self::Collection(_) => CollectionNode::handle_msg(self_node, msg),
+            Self::Camera(_) => CameraNode::handle_msg(self_node, msg),
+            Self::Scene(_) => SceneNode::handle_msg(self_node, msg),
+            Self::Render(_) => RenderNode::handle_msg(self_node, msg),
+            Self::Output(_) => OutputNode::handle_msg(self_node, msg),
+            Self::Expression(_) => ExpressionNode::handle_msg(self_node, msg),
+            _ => None,
         }
     }
 
@@ -304,6 +320,13 @@ impl Node {
         }
     }
 
+    fn as_material_node_ref(&self) -> &MaterialNode {
+        match self {
+            Self::Material(material_node) => material_node,
+            node => panic!("Node `{}` is not a `{}`", node.name(), MaterialNode::NAME),
+        }
+    }
+
     fn as_material_node_mut(&mut self) -> &mut MaterialNode {
         match self {
             Self::Material(material_node) => material_node,
@@ -318,6 +341,18 @@ impl Node {
         }
     }
 
+    fn primitive_node_ref(&self) -> Option<&PrimitiveNode> {
+        match self {
+            Self::Primitive(primitive_node) => Some(primitive_node),
+            _ => None,
+        }
+    }
+
+    fn as_primitive_node_ref(&self) -> &PrimitiveNode {
+        self.primitive_node_ref()
+            .unwrap_or_else(|| panic!("Node `{}` is not a `{}`", self.name(), PrimitiveNode::NAME))
+    }
+
     fn as_primitive_node_mut(&mut self) -> &mut PrimitiveNode {
         match self {
             Self::Primitive(primitive_node) => primitive_node,
@@ -329,6 +364,18 @@ impl Node {
         match self {
             Self::Collection(collection_node) => Some(collection_node),
             _ => None,
+        }
+    }
+
+    pub fn as_collection_node_ref(&self) -> &CollectionNode {
+        self.collection_node_ref()
+            .unwrap_or_else(|| panic!("Node `{}` is not a `{}`", self.name(), CollectionNode::NAME))
+    }
+
+    fn as_collection_node_mut(&mut self) -> &mut CollectionNode {
+        match self {
+            Self::Collection(collection_node) => collection_node,
+            node => panic!("Node `{}` is not a `{}`", node.name(), CollectionNode::NAME),
         }
     }
 
@@ -360,11 +407,30 @@ impl Node {
         }
     }
 
+    fn as_scene_node_ref(&self) -> &SceneNode {
+        match self {
+            Self::Scene(scene_node) => scene_node,
+            node => panic!("Node `{}` is not a `{}`", node.name(), SceneNode::NAME),
+        }
+    }
+
+    fn as_scene_node_mut(&mut self) -> &mut SceneNode {
+        match self {
+            Self::Scene(scene_node) => scene_node,
+            node => panic!("Node `{}` is not a `{}`", node.name(), SceneNode::NAME),
+        }
+    }
+
     fn render_node_ref(&self) -> Option<&RenderNode> {
         match self {
             Self::Render(render_node) => Some(render_node),
             _ => None,
         }
+    }
+
+    fn as_render_node_ref(&self) -> &RenderNode {
+        self.render_node_ref()
+            .unwrap_or_else(|| panic!("Node `{}` is not a `{}`", self.name(), RenderNode::NAME))
     }
 
     fn as_render_node_mut(&mut self) -> &mut RenderNode {
@@ -389,6 +455,26 @@ impl Node {
     }
 }
 
+pub fn collect_for_node(
+    node_id: Option<NodeId>,
+    predicate: &dyn Fn(&Node) -> bool,
+    destination: &mut FastIndexSet<NodeId>,
+    snarl: &mut Snarl<Node>,
+) {
+    if let Some(node_id) = node_id {
+        let self_node = SelfNodeMut::new(node_id, snarl);
+        let need_insert = predicate(self_node.node_ref());
+
+        Node::handle_msg(
+            self_node,
+            CommonNodeMessage::Input(InputMessage::CollectIds { predicate, destination }),
+        );
+        if need_insert {
+            destination.insert(node_id);
+        }
+    }
+}
+
 #[derive(Clone, Default, Serialize, Deserialize)]
 pub struct OutputNode;
 
@@ -404,15 +490,13 @@ impl OutputNode {
     pub fn outputs(&self) -> &[u64] {
         &Self::OUTPUTS
     }
+}
 
-    pub fn show_input(pin: &InPin, ui: &mut Ui, _snarl: &mut Snarl<Node>) -> PinInfo {
-        match pin.id.input {
+impl MessageHandling for OutputNode {
+    fn handle_input_show(_self_node: SelfNodeMut, pin: &InPin, ui: &mut Ui) -> Option<PinInfo> {
+        Some(match pin.id.input {
             0 => empty_input_view(ui, "Output"),
             _ => unreachable!(),
-        }
+        })
     }
-
-    pub fn connect_input(&mut self, _from: &OutPin, _to: &InPin) {}
-
-    pub fn disconnect_input(&mut self, _input_pin: &InPin) {}
 }

@@ -6,9 +6,12 @@ use egui_snarl::{InPin, NodeId, OutPin, Snarl};
 use serde::{Deserialize, Serialize};
 
 use crate::node::camera::{CameraNode, camera_node_by_id};
+use crate::node::message::{MessageHandling, SelfNodeMut};
+use crate::node::scene::{SceneNode, SceneNodeResponse};
 use crate::node::viewer::{empty_input_view, number_input_remote_value, number_input_view};
-use crate::node::{Node, NodeFlags};
-use crate::raytracer::{Camera, Raytracer, RenderParams, SamplingParams, Scene};
+use crate::node::{Node, NodeFlags, collect_for_node};
+use crate::raytracer::scene::Scene;
+use crate::raytracer::{Camera, Raytracer, RenderParams, SamplingParams};
 use crate::types::NodePin;
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -17,8 +20,11 @@ pub struct RaytracerRenderNode {
     num_samples_per_pixel: NodePin<u32>,
     num_bounces: NodePin<u32>,
     camera: NodePin<Option<NodeId>>,
+    scene: Option<NodeId>,
 
     max_viewport_resolution: u32,
+    #[serde(skip)]
+    disconnect_scene: bool,
 }
 
 impl RaytracerRenderNode {
@@ -29,8 +35,10 @@ impl RaytracerRenderNode {
             num_samples_per_pixel: NodePin::new(sampling.num_samples_per_pixel),
             num_bounces: NodePin::new(sampling.num_bounces),
             camera: Default::default(),
+            scene: Default::default(),
 
             max_viewport_resolution,
+            disconnect_scene: false,
         }
     }
 
@@ -55,11 +63,12 @@ impl RaytracerRenderNode {
 
 impl RaytracerRenderNode {
     pub const NAME: &str = "Raytracer Render";
-    pub const INPUTS: [u64; 4] = [
+    pub const INPUTS: [u64; 5] = [
         NodeFlags::TYPICAL_NUMBER_INPUT.bits(),
         NodeFlags::TYPICAL_NUMBER_INPUT.bits(),
         NodeFlags::TYPICAL_NUMBER_INPUT.bits(),
         NodeFlags::CAMERA.bits(),
+        NodeFlags::SCENE.bits(),
     ];
     pub const OUTPUTS: [u64; 1] = [NodeFlags::RENDER_RAYTRACER.bits()];
 
@@ -71,67 +80,6 @@ impl RaytracerRenderNode {
         &Self::OUTPUTS
     }
 
-    pub fn show_input(pin: &InPin, ui: &mut Ui, snarl: &mut Snarl<Node>) -> PinInfo {
-        match pin.id.input {
-            0 => {
-                const LABEL: &str = "Total samples per pixel";
-
-                let remote_value =
-                    number_input_remote_value(pin, snarl, LABEL).map(|(name, value)| (name, value as u32));
-                let node = snarl[pin.id.node].as_render_node_mut().as_raytracer_render_mut();
-                number_input_view(ui, LABEL, &mut node.max_samples_per_pixel, remote_value)
-            },
-            1 => {
-                const LABEL: &str = "Samples per pixel per frame";
-
-                let remote_value =
-                    number_input_remote_value(pin, snarl, LABEL).map(|(name, value)| (name, value as u32));
-                let node = snarl[pin.id.node].as_render_node_mut().as_raytracer_render_mut();
-                number_input_view(ui, LABEL, &mut node.num_samples_per_pixel, remote_value)
-            },
-            2 => {
-                const LABEL: &str = "Bounces per ray";
-
-                let remote_value =
-                    number_input_remote_value(pin, snarl, LABEL).map(|(name, value)| (name, value as u32));
-                let node = snarl[pin.id.node].as_render_node_mut().as_raytracer_render_mut();
-                number_input_view(ui, LABEL, &mut node.num_bounces, remote_value)
-            },
-            3 => {
-                const LABEL: &str = "Camera";
-
-                let remote_value = match &*pin.remotes {
-                    [] => None,
-                    [remote] => Some(match &snarl[remote.node] {
-                        Node::Camera(_) => Some(remote.node),
-                        node => unreachable!("{LABEL} input not suppor connection with `{}`", node.name()),
-                    }),
-                    _ => None,
-                };
-
-                if let Some(value) = remote_value {
-                    let node = snarl[pin.id.node].as_render_node_mut().as_raytracer_render_mut();
-                    node.camera.set(value);
-                }
-
-                empty_input_view(ui, LABEL)
-            },
-            _ => unreachable!(),
-        }
-    }
-
-    pub fn connect_input(&mut self, _from: &OutPin, _to: &InPin) {}
-
-    pub fn disconnect_input(&mut self, input_pin: &InPin) {
-        match input_pin.id.input {
-            0 => self.max_samples_per_pixel.reset(),
-            1 => self.num_samples_per_pixel.reset(),
-            2 => self.num_bounces.reset(),
-            3 => self.camera.reset(),
-            _ => unreachable!(),
-        }
-    }
-
     pub fn register(&self, render_state: &RenderState) {
         RaytracerRenderResources::register(render_state, self, (0, 0));
     }
@@ -140,21 +88,145 @@ impl RaytracerRenderNode {
         RaytracerRenderResources::unregister(render_state);
     }
 
-    pub fn draw(&self, viewport: egui::Rect, painter: &egui::Painter, snarl: &Snarl<Node>) {
-        if let Some(camera_node) = self.camera_node(snarl) {
-            let render_params = RenderParams {
-                camera: Camera::from_node(camera_node),
-                sky: Default::default(),
-                sampling: self.sampling_params(),
-            };
-            let callback = Callback::new_paint_callback(viewport, Drawer { render_params });
+    pub fn draw(self_node: SelfNodeMut, viewport: egui::Rect, painter: &egui::Painter) {
+        let node = self_node.as_render_node_ref().as_raytracer_render_ref();
+        let render_params = node.camera_node(self_node.snarl).map(|camera_node| RenderParams {
+            camera: Camera::from_node(camera_node),
+            sky: Default::default(),
+            sampling: node.sampling_params(),
+        });
+
+        let scene = if let Some(scene_node_id) = node.scene {
+            if let SceneNodeResponse::Recalculated =
+                SceneNode::handle_recalculate(SelfNodeMut::new(scene_node_id, self_node.snarl))
+            {
+                Some(self_node.snarl[scene_node_id].as_scene_node_ref().as_scene().clone())
+            } else {
+                None
+            }
+        } else if node.disconnect_scene {
+            self_node.snarl[self_node.id]
+                .as_render_node_mut()
+                .as_raytracer_render_mut()
+                .disconnect_scene = false;
+            Some(Scene::stub())
+        } else {
+            None
+        };
+
+        if let Some(render_params) = render_params {
+            let callback = Callback::new_paint_callback(viewport, Drawer { render_params, scene });
             painter.add(callback);
         }
     }
 }
 
+impl MessageHandling for RaytracerRenderNode {
+    fn handle_input_show(mut self_node: SelfNodeMut, pin: &InPin, ui: &mut Ui) -> Option<PinInfo> {
+        Some(match pin.id.input {
+            0 => {
+                const LABEL: &str = "Total samples per pixel";
+
+                let remote_value =
+                    number_input_remote_value(pin, self_node.snarl, LABEL).map(|(name, value)| (name, value as u32));
+                let node = self_node.as_render_node_mut().as_raytracer_render_mut();
+                number_input_view(ui, LABEL, &mut node.max_samples_per_pixel, remote_value)
+            },
+            1 => {
+                const LABEL: &str = "Samples per pixel per frame";
+
+                let remote_value =
+                    number_input_remote_value(pin, self_node.snarl, LABEL).map(|(name, value)| (name, value as u32));
+                let node = self_node.as_render_node_mut().as_raytracer_render_mut();
+                number_input_view(ui, LABEL, &mut node.num_samples_per_pixel, remote_value)
+            },
+            2 => {
+                const LABEL: &str = "Bounces per ray";
+
+                let remote_value =
+                    number_input_remote_value(pin, self_node.snarl, LABEL).map(|(name, value)| (name, value as u32));
+                let node = self_node.as_render_node_mut().as_raytracer_render_mut();
+                number_input_view(ui, LABEL, &mut node.num_bounces, remote_value)
+            },
+            3 => {
+                const LABEL: &str = "Camera";
+
+                let remote_value = match &*pin.remotes {
+                    [] => None,
+                    [remote] => Some(match &self_node.snarl[remote.node] {
+                        Node::Camera(_) => Some(remote.node),
+                        node => unreachable!("{LABEL} input not suppor connection with `{}`", node.name()),
+                    }),
+                    _ => None,
+                };
+
+                if let Some(value) = remote_value {
+                    let node = self_node.as_render_node_mut().as_raytracer_render_mut();
+                    node.camera.set(value);
+                }
+
+                empty_input_view(ui, LABEL)
+            },
+            4 => {
+                const LABEL: &str = "Scene";
+
+                let remote_value = match &*pin.remotes {
+                    [] => None,
+                    [remote] => Some(match &mut self_node.snarl[remote.node] {
+                        Node::Scene(_) => Some(remote.node),
+                        node => unreachable!("{LABEL} input not suppor connection with `{}`", node.name()),
+                    }),
+                    _ => None,
+                };
+
+                if let Some(value) = remote_value {
+                    let node = self_node.as_render_node_mut().as_raytracer_render_mut();
+
+                    node.scene = value;
+                    if value != node.scene {
+                        if let Some(scene_id) = node.scene {
+                            self_node.node_by_id_mut(scene_id).as_scene_node_mut().register_render();
+                        }
+                    }
+                }
+
+                empty_input_view(ui, LABEL)
+            },
+            _ => unreachable!(),
+        })
+    }
+
+    fn handle_input_disconnect(mut self_node: SelfNodeMut, _from: &OutPin, to: &InPin) {
+        let node = self_node.as_render_node_mut().as_raytracer_render_mut();
+        match to.id.input {
+            0 => node.max_samples_per_pixel.reset(),
+            1 => node.num_samples_per_pixel.reset(),
+            2 => node.num_bounces.reset(),
+            3 => node.camera.reset(),
+            4 => {
+                node.scene = None;
+                node.disconnect_scene = true
+            },
+            _ => unreachable!(),
+        }
+    }
+
+    fn handle_input_collect_ids(
+        self_node: SelfNodeMut,
+        predicate: &dyn Fn(&Node) -> bool,
+        destination: &mut wgpu::naga::FastIndexSet<NodeId>,
+    ) {
+        let camera_node_id = self_node.as_render_node_ref().as_raytracer_render_ref().camera.get();
+        let scene_node_id = self_node.as_render_node_ref().as_raytracer_render_ref().scene;
+
+        collect_for_node(camera_node_id, predicate, destination, self_node.snarl);
+        collect_for_node(scene_node_id, predicate, destination, self_node.snarl);
+    }
+}
+
 struct Drawer {
     render_params: RenderParams,
+    scene: Option<Scene>,
 }
 
 impl CallbackTrait for Drawer {
@@ -168,7 +240,7 @@ impl CallbackTrait for Drawer {
     ) -> Vec<wgpu::CommandBuffer> {
         if let Some(resources) = callback_resources.get_mut::<RaytracerRenderResources>() {
             let viewport_size = (screen_descriptor.size_in_pixels[0], screen_descriptor.size_in_pixels[1]);
-            resources.prepare(device, queue, &self.render_params, viewport_size);
+            resources.prepare(device, queue, &self.render_params, self.scene.as_ref(), viewport_size);
         }
         Vec::new()
     }
@@ -198,7 +270,7 @@ impl RaytracerRenderResources {
     ) -> Self {
         let device = &render_state.device;
         let target_format = render_state.target_format;
-        let scene = Scene::test();
+        let scene = Scene::stub();
 
         Self {
             renderer: Raytracer::new(
@@ -234,12 +306,14 @@ impl RaytracerRenderResources {
 
     pub fn prepare(
         &mut self,
-        _device: &wgpu::Device,
+        device: &wgpu::Device,
         queue: &wgpu::Queue,
         render_params: &RenderParams,
+        scene: Option<&Scene>,
         viewport_size: (u32, u32),
     ) {
-        self.renderer.prepare_frame(queue, render_params, viewport_size);
+        self.renderer
+            .prepare_frame(device, queue, render_params, scene, viewport_size);
     }
 
     pub fn paint(&self, rpass: &mut wgpu::RenderPass<'static>) {

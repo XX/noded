@@ -1,14 +1,17 @@
 use eframe::wgpu;
 use eframe::wgpu::util::DeviceExt;
 use gpu_buffer::{StorageBuffer, UniformBuffer};
+use scene::SceneBuffersGroup;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+use self::scene::Scene;
 pub use self::texture::Texture;
 use crate::node::camera::CameraNode;
-use crate::types::{Angle, Matrix4f32, Vector3, Vector3f32, Vector4f32, from_vector3_to_vector3f32};
+use crate::types::{Angle, Matrix4f32, Vector3, Vector3f32, from_vector3_to_vector3f32};
 
 mod gpu_buffer;
+pub mod scene;
 mod texture;
 
 use std::f32::consts::*;
@@ -22,7 +25,7 @@ pub struct Raytracer {
     sampling_parameter_buffer: UniformBuffer,
     hw_sky_state_buffer: StorageBuffer,
     parameter_bind_group: wgpu::BindGroup,
-    scene_bind_group: wgpu::BindGroup,
+    scene_group: SceneBuffersGroup,
     pipeline: wgpu::RenderPipeline,
     latest_render_params: RenderParams,
     render_progress: RenderProgress,
@@ -117,82 +120,7 @@ impl Raytracer {
             label: Some("parameter bind group"),
         });
 
-        let (scene_bind_group_layout, scene_bind_group) = {
-            let sphere_buffer = StorageBuffer::new_from_bytes(
-                device,
-                bytemuck::cast_slice(scene.spheres.as_slice()),
-                0,
-                Some("scene buffer"),
-            );
-
-            let mut global_texture_data: Vec<[f32; 3]> = Vec::new();
-            let mut material_data: Vec<GpuMaterial> = Vec::with_capacity(scene.materials.len());
-
-            for material in scene.materials.iter() {
-                let gpu_material = match material {
-                    Material::Lambertian { albedo } => GpuMaterial::lambertian(albedo, &mut global_texture_data),
-                    Material::Metal { albedo, fuzz } => GpuMaterial::metal(albedo, *fuzz, &mut global_texture_data),
-                    Material::Dielectric { refraction_index } => GpuMaterial::dielectric(*refraction_index),
-                    Material::Checkerboard { odd, even } => {
-                        GpuMaterial::checkerboard(odd, even, &mut global_texture_data)
-                    },
-                    Material::Emissive { emit } => GpuMaterial::emissive(emit, &mut global_texture_data),
-                };
-
-                material_data.push(gpu_material);
-            }
-
-            let material_buffer = StorageBuffer::new_from_bytes(
-                device,
-                bytemuck::cast_slice(material_data.as_slice()),
-                1,
-                Some("materials buffer"),
-            );
-
-            let texture_buffer = StorageBuffer::new_from_bytes(
-                device,
-                bytemuck::cast_slice(global_texture_data.as_slice()),
-                2,
-                Some("textures buffer"),
-            );
-
-            let light_indices: Vec<u32> = scene
-                .spheres
-                .iter()
-                .enumerate()
-                .filter(|(_, s)| matches!(scene.materials[s.material_idx as usize], Material::Emissive { .. }))
-                .map(|(idx, _)| idx as u32)
-                .collect();
-
-            let light_buffer = StorageBuffer::new_from_bytes(
-                device,
-                bytemuck::cast_slice(light_indices.as_slice()),
-                3,
-                Some("lights buffer"),
-            );
-
-            let scene_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                entries: &[
-                    sphere_buffer.layout(wgpu::ShaderStages::FRAGMENT, true),
-                    material_buffer.layout(wgpu::ShaderStages::FRAGMENT, true),
-                    texture_buffer.layout(wgpu::ShaderStages::FRAGMENT, true),
-                    light_buffer.layout(wgpu::ShaderStages::FRAGMENT, true),
-                ],
-                label: Some("scene layout"),
-            });
-            let scene_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                layout: &scene_bind_group_layout,
-                entries: &[
-                    sphere_buffer.binding(),
-                    material_buffer.binding(),
-                    texture_buffer.binding(),
-                    light_buffer.binding(),
-                ],
-                label: Some("scene bind group"),
-            });
-
-            (scene_bind_group_layout, scene_bind_group)
-        };
+        let scene_group = SceneBuffersGroup::new(scene, device);
 
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             source: wgpu::ShaderSource::Wgsl(include_str!("raytracer_shader.wgsl").into()),
@@ -204,7 +132,7 @@ impl Raytracer {
                 &vertex_uniform_bind_group_layout,
                 &image_bind_group_layout,
                 &parameter_bind_group_layout,
-                &scene_bind_group_layout,
+                &scene_group.layout(),
             ],
             push_constant_ranges: &[],
             label: Some("raytracer layout"),
@@ -271,7 +199,7 @@ impl Raytracer {
             sampling_parameter_buffer,
             hw_sky_state_buffer,
             parameter_bind_group,
-            scene_bind_group,
+            scene_group,
             vertex_buffer,
             pipeline,
             latest_render_params: *render_params,
@@ -280,9 +208,20 @@ impl Raytracer {
         })
     }
 
-    pub fn prepare_frame(&mut self, queue: &wgpu::Queue, render_params: &RenderParams, viewport_size: (u32, u32)) {
-        self.set_render_params(queue, render_params, viewport_size)
+    pub fn prepare_frame(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        render_params: &RenderParams,
+        scene: Option<&Scene>,
+        viewport_size: (u32, u32),
+    ) {
+        self.set_render_params(queue, scene.is_some(), render_params, viewport_size)
             .expect("Render params should be valid");
+
+        if let Some(scene) = scene {
+            self.scene_group.update(&device, &queue, scene);
+        }
 
         let gpu_sampling_params = self.render_progress.next_frame(&self.latest_render_params.sampling);
 
@@ -304,7 +243,7 @@ impl Raytracer {
         render_pass.set_bind_group(0, &self.vertex_uniform_bind_group, &[]);
         render_pass.set_bind_group(1, &self.image_bind_group, &[]);
         render_pass.set_bind_group(2, &self.parameter_bind_group, &[]);
-        render_pass.set_bind_group(3, &self.scene_bind_group, &[]);
+        render_pass.set_bind_group(3, self.scene_group.bind_group(), &[]);
         render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
 
         let num_vertices = VERTICES.len() as u32;
@@ -314,10 +253,11 @@ impl Raytracer {
     pub fn set_render_params(
         &mut self,
         queue: &wgpu::Queue,
+        render_force: bool,
         render_params: &RenderParams,
         viewport_size: (u32, u32),
     ) -> Result<(), RenderParamsValidationError> {
-        if *render_params == self.latest_render_params {
+        if !render_force && *render_params == self.latest_render_params {
             return Ok(());
         }
 
@@ -368,100 +308,7 @@ pub enum RenderParamsValidationError {
     HwSkyModelValidationError(#[from] hw_skymodel::rgb::Error),
 }
 
-#[derive(Debug, Default)]
-pub struct Scene {
-    pub spheres: Vec<Sphere>,
-    pub materials: Vec<Material>,
-}
-
-impl Scene {
-    pub fn test() -> Self {
-        let materials = vec![
-            Material::Checkerboard {
-                even: Texture::new_from_color(Vector3f32::new(0.5, 0.7, 0.8)),
-                odd: Texture::new_from_color(Vector3f32::new(0.9, 0.9, 0.9)),
-            },
-            Material::Lambertian {
-                albedo: Texture::new_from_image("assets/moon.jpeg").expect("Hardcoded path should be valid"),
-            },
-            Material::Metal {
-                albedo: Texture::new_from_color(Vector3f32::new(1.0, 0.85, 0.57)),
-                fuzz: 0.4,
-            },
-            Material::Dielectric { refraction_index: 1.5 },
-            Material::Lambertian {
-                albedo: Texture::new_from_image("assets/earthmap.jpeg").expect("Hardcoded path should be valid"),
-            },
-            Material::Emissive {
-                emit: Texture::new_from_scaled_image("assets/sun.jpeg", 50.0).expect("Hardcoded path should be valid"),
-            },
-            Material::Lambertian {
-                albedo: Texture::new_from_color(Vector3f32::new(0.3, 0.9, 0.9)),
-            },
-            Material::Emissive {
-                emit: Texture::new_from_color(Vector3f32::new(50.0, 0.0, 0.0)),
-            },
-            Material::Emissive {
-                emit: Texture::new_from_color(Vector3f32::new(0.0, 50.0, 0.0)),
-            },
-            Material::Emissive {
-                emit: Texture::new_from_color(Vector3f32::new(0.0, 0.0, 50.0)),
-            },
-        ];
-
-        let spheres = vec![
-            Sphere::new(Vector3::new(0.0, -500.0, -1.0), 500.0, 0),
-            // left row
-            Sphere::new(Vector3::new(-5.0, 1.0, -4.0), 1.0, 7),
-            Sphere::new(Vector3::new(0.0, 1.0, -4.0), 1.0, 8),
-            Sphere::new(Vector3::new(5.0, 1.0, -4.0), 1.0, 9),
-            // middle row
-            Sphere::new(Vector3::new(-5.0, 1.0, 0.0), 1.0, 2),
-            Sphere::new(Vector3::new(0.0, 1.0, 0.0), 1.0, 3),
-            Sphere::new(Vector3::new(5.0, 1.0, 0.0), 1.0, 6),
-            // right row
-            Sphere::new(Vector3::new(-5.0, 0.8, 4.0), 0.8, 1),
-            Sphere::new(Vector3::new(0.0, 1.2, 4.0), 1.2, 4),
-            Sphere::new(Vector3::new(5.0, 2.0, 4.0), 2.0, 5),
-        ];
-
-        Self { spheres, materials }
-    }
-}
-
-#[repr(C)]
-#[derive(Clone, Copy, Debug, bytemuck::NoUninit)]
-pub struct Sphere {
-    // NOTE: naga memory alignment issue, see discussion at
-    // https://github.com/gfx-rs/naga/issues/2000
-    // It's safer to just use Vec4 instead of Vec3.
-    center: Vector4f32, // 0 byte offset
-    radius: f32,        // 16 byte offset
-    material_idx: u32,  // 20 byte offset
-    _padding: [u32; 2], // 24 byte offset, 8 bytes size
-}
-
-impl Sphere {
-    pub fn new(center: Vector3, radius: f64, material_idx: u32) -> Self {
-        Self {
-            center: Vector4f32::new(center.x as _, center.y as _, center.z as _, 0.0),
-            radius: radius as _,
-            material_idx,
-            _padding: [0; 2],
-        }
-    }
-}
-
-#[derive(Debug)]
-pub enum Material {
-    Lambertian { albedo: Texture },
-    Metal { albedo: Texture, fuzz: f32 },
-    Dielectric { refraction_index: f32 },
-    Checkerboard { even: Texture, odd: Texture },
-    Emissive { emit: Texture },
-}
-
-#[derive(Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct RenderParams {
     pub camera: Camera,
     pub sky: SkyParams,
@@ -497,7 +344,7 @@ impl RenderParams {
     }
 }
 
-#[derive(Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Camera {
     pub eye_pos: Vector3,
     pub eye_dir: Vector3,
@@ -525,7 +372,7 @@ impl Camera {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct SkyParams {
     // Azimuth must be between 0..=360 degrees
     pub azimuth: Angle,
@@ -576,7 +423,7 @@ impl SkyParams {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct SamplingParams {
     pub max_samples_per_pixel: u32,
     pub num_samples_per_pixel: u32,
@@ -698,91 +545,6 @@ impl GpuCamera {
             lens_radius: lens_radius as _,
             lower_left_corner: from_vector3_to_vector3f32(&lower_left_corner),
             _padding5: 0.0,
-        }
-    }
-}
-
-#[repr(C)]
-#[derive(Clone, Copy, Debug, bytemuck::Pod, bytemuck::Zeroable)]
-struct GpuMaterial {
-    id: u32,
-    desc1: TextureDescriptor,
-    desc2: TextureDescriptor,
-    x: f32,
-}
-
-impl GpuMaterial {
-    pub fn lambertian(albedo: &Texture, global_texture_data: &mut Vec<[f32; 3]>) -> Self {
-        Self {
-            id: 0,
-            desc1: Self::append_to_global_texture_data(albedo, global_texture_data),
-            desc2: TextureDescriptor::empty(),
-            x: 0.0,
-        }
-    }
-
-    pub fn metal(albedo: &Texture, fuzz: f32, global_texture_data: &mut Vec<[f32; 3]>) -> Self {
-        Self {
-            id: 1,
-            desc1: Self::append_to_global_texture_data(albedo, global_texture_data),
-            desc2: TextureDescriptor::empty(),
-            x: fuzz,
-        }
-    }
-
-    pub fn dielectric(refraction_index: f32) -> Self {
-        Self {
-            id: 2,
-            desc1: TextureDescriptor::empty(),
-            desc2: TextureDescriptor::empty(),
-            x: refraction_index,
-        }
-    }
-
-    pub fn checkerboard(even: &Texture, odd: &Texture, global_texture_data: &mut Vec<[f32; 3]>) -> Self {
-        Self {
-            id: 3,
-            desc1: Self::append_to_global_texture_data(even, global_texture_data),
-            desc2: Self::append_to_global_texture_data(odd, global_texture_data),
-            x: 0.0,
-        }
-    }
-
-    pub fn emissive(emit: &Texture, global_texture_data: &mut Vec<[f32; 3]>) -> Self {
-        Self {
-            id: 4,
-            desc1: Self::append_to_global_texture_data(emit, global_texture_data),
-            desc2: TextureDescriptor::empty(),
-            x: 0.0,
-        }
-    }
-
-    fn append_to_global_texture_data(texture: &Texture, global_texture_data: &mut Vec<[f32; 3]>) -> TextureDescriptor {
-        let dimensions = texture.dimensions();
-        let offset = global_texture_data.len() as u32;
-        global_texture_data.extend_from_slice(texture.as_slice());
-        TextureDescriptor {
-            width: dimensions.0,
-            height: dimensions.1,
-            offset,
-        }
-    }
-}
-
-#[repr(C)]
-#[derive(Clone, Copy, Debug, bytemuck::Pod, bytemuck::Zeroable)]
-struct TextureDescriptor {
-    width: u32,
-    height: u32,
-    offset: u32,
-}
-
-impl TextureDescriptor {
-    pub fn empty() -> Self {
-        Self {
-            width: 0,
-            height: 0,
-            offset: 0xffffffff,
         }
     }
 }
